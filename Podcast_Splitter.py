@@ -50,7 +50,6 @@ def main():
             os.remove(file)  # Delete original file once it has been splitted
             files_split_count += 1
 
-
     # Move the splitted files to their new destination.
     for file in os.listdir(split_dir):
         extension = os.path.splitext(file)[-1].lower()
