@@ -4,9 +4,9 @@ from mutagen.id3 import ID3
 from mutagen.mp3 import MP3
 import mutagen
 
-main_audio_dir = os.path.realpath("E:\Google Drive\Audio")
+main_audio_dir = os.path.realpath("E:/Google Drive/Audio")
 mp3split_exe_loc = os.path.realpath(
-    "C:\Program Files (x86)\mp3splt\mp3splt.exe")  # mp3splt (non-GUI) must be installed to run this.
+    "C:/Program Files (x86)/mp3splt/mp3splt.exe")  # mp3splt (non-GUI) must be installed to run this.
 
 files_split_count = 0
 files_moved_count = 0
@@ -18,7 +18,6 @@ empty_directories_removed = 0
 def main():
     # Initialize variables
     files_to_split_dir = os.path.join(main_audio_dir, "Podcasts - to split")
-    print("files_to_split_dir: " + str(files_to_split_dir))
     output_dir = os.path.join(main_audio_dir, "Podcasts")
     global files_split_count
     global files_moved_count
