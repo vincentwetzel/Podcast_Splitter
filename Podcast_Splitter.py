@@ -2,35 +2,43 @@ import subprocess
 import os
 from mutagen.id3 import ID3
 from mutagen.mp3 import MP3
+import mutagen
 
-main_audio_dir = "E:\Google Drive\Audio"
-mp3split_exe_loc = "C:\Program Files (x86)\mp3splt\mp3splt.exe"  # mp3splt (non-GUI) must be installed to run this.
+main_audio_dir = os.path.realpath("E:\Google Drive\Audio")
+mp3split_exe_loc = os.path.realpath(
+    "C:\Program Files (x86)\mp3splt\mp3splt.exe")  # mp3splt (non-GUI) must be installed to run this.
 
 files_split_count = 0
 files_moved_count = 0
 files_split_dict = dict()
 files_with_unknown_album = list()
+empty_directories_removed = 0
 
 
 def main():
     # Initialize variables
-    split_dir = main_audio_dir + "\\Podcasts - to split"
-    main_output_dir = main_audio_dir + "\\Podcasts"
+    files_to_split_dir = os.path.join(main_audio_dir, "Podcasts - to split")
+    print("files_to_split_dir: " + str(files_to_split_dir))
+    output_dir = os.path.join(main_audio_dir, "Podcasts")
     global files_split_count
     global files_moved_count
     global files_split_dict
     global files_with_unknown_album
+    global empty_directories_removed
 
-    os.chdir(split_dir)  # Change current working directory
+    os.chdir(files_to_split_dir)  # Change current working directory
     # Split the files if they are < 10 min
     for file in os.listdir(os.getcwd()):
         if str(file) == "Thumbs.db":
             continue
+        print("Processing file: " + str(file))
 
         # Initialize metadata values
         audio_file = MP3(file)
         id3_tags = ID3(file)  # Calls constructor
         album_title = str(id3_tags.get("TALB"))  # Album Title
+
+        # TODO: Add in a way to check the genre and pass on the file if the genre is missing or not "Podcast"
 
         if album_title == "None":
             files_with_unknown_album.append(file)
@@ -51,7 +59,7 @@ def main():
             files_split_count += 1
 
     # Move the splitted files to their new destination.
-    for file in os.listdir(split_dir):
+    for file in os.listdir(files_to_split_dir):
         extension = os.path.splitext(file)[-1].lower()
         if extension != ".mp3":
             continue
@@ -62,12 +70,21 @@ def main():
             album_title = id3_tags.get("TALB")  # Album Title
 
             # If output directory doesn't exist, create it
-            if not os.path.exists(os.path.join(main_output_dir, str(album_title))):
-                os.makedirs(os.path.join(main_output_dir, str(album_title)))
-            os.rename(os.path.join(split_dir, file),
-                      os.path.join(main_output_dir, str(album_title), file))  # Move file to final destination
+            if not os.path.exists(os.path.join(output_dir, str(album_title))):
+                os.makedirs(os.path.join(output_dir, str(album_title)))
+            os.rename(os.path.join(files_to_split_dir, file),
+                      os.path.join(output_dir, str(album_title), file))  # Move file to final destination
 
             files_moved_count += 1
+
+    # Check output directories, remove any that are empty.
+    for dir in os.listdir(output_dir):
+        if os.path.isdir(os.path.join(output_dir, dir)) and not os.listdir(os.path.join(output_dir, dir)):
+            try:
+                os.rmdir(os.path.join(output_dir, dir))
+                empty_directories_removed += 1
+            except OSError as e:
+                print(e)
 
     # Print a report of the files that were split
     print("\n")
@@ -79,10 +96,12 @@ def main():
     # Print a final report
     print("\n\nFiles Split: " + str(files_split_count))
     print("Files Moved: " + str(files_moved_count))
-    print("Problems: " + str(len(files_with_unknown_album)))
-    print_section("Files with Unknown Album (not split)", "*")
-    for file in files_with_unknown_album:
-        print(file)
+    print("Empty Directories Removed: " + str(empty_directories_removed))
+    print("\nTotal Errors: " + str(len(files_with_unknown_album)))
+    if len(files_with_unknown_album) > 0:
+        print_section("Files with Unknown Album (not split)", "*")
+        for file in files_with_unknown_album:
+            print(file)
 
 
 def run_win_cmd(cmd):
