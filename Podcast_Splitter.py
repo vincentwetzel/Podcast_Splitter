@@ -82,6 +82,7 @@ def main():
             try:
                 os.rmdir(os.path.join(output_dir, dir))
                 empty_directories_removed += 1
+                print("Empty directory removed: " + str(os.path.join(output_dir, dir)))
             except OSError as e:
                 print(e)
 
@@ -93,7 +94,7 @@ def main():
             print(val)
 
     # Print a final report
-    print("\n\nFiles Split: " + str(files_split_count))
+    print("\nFiles Split: " + str(files_split_count))
     print("Files Moved: " + str(files_moved_count))
     print("Empty Directories Removed: " + str(empty_directories_removed))
     print("\nTotal Errors: " + str(len(files_with_unknown_album)))
