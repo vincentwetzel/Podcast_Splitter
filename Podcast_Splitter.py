@@ -30,7 +30,6 @@ def main():
     for file in os.listdir(os.getcwd()):
         if str(file) == "Thumbs.db":
             continue
-        print("Processing file: " + str(file))
 
         # Initialize metadata values
         audio_file = MP3(file)
@@ -87,6 +86,7 @@ def main():
                 print(e)
 
     # Print a report of the files that were split
+    print_section("FINAL REPORT", "*")
     print("\n")
     for key in files_split_dict:
         print_section(key, "*")
@@ -105,7 +105,12 @@ def main():
 
 
 def run_win_cmd(cmd):
-    print("INPUT COMMAND: " + str(cmd))
+    """
+    Runs a command in a new cmd window. This ONLY works on Windows OS.
+    :param cmd: The command to run.
+    :return:    None
+    """
+    print("INPUT COMMAND: " + str(cmd) + "\n")
     result = []
     process = subprocess.Popen(cmd,
                                shell=True,
@@ -119,11 +124,13 @@ def run_win_cmd(cmd):
         raise Exception('cmd %s failed, see above for details', cmd)
 
 
-def listdir_fullpath(d):
-    return [os.path.join(d, f) for f in os.listdir(d)]
-
-
 def print_section(section_title, symbol):
+    """
+    Prints a section title encased in a box of stars.
+    :param section_title:   The name of the section title.
+    :param symbol:  The symbol to use to create a box around the section_title. Usually this will be the '*' symbol.
+    :return:    None
+    """
     print("\n" + (symbol * 50) + "\n* " + section_title + "\n" + (symbol * 50) + "\n")
 
 
