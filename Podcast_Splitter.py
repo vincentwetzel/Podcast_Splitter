@@ -4,7 +4,7 @@ from mutagen.id3 import ID3
 from mutagen.mp3 import MP3
 import mutagen
 
-main_audio_dir = os.path.realpath("E:/Google Drive/Audio")
+main_audio_dir = os.path.realpath("E:/Google Drive (vincentwetzel3@gmail.com)/Audio")
 mp3split_exe_loc = os.path.realpath(
     "C:/Program Files (x86)/mp3splt/mp3splt.exe")  # mp3splt (non-GUI) must be installed to run this.
 
@@ -107,6 +107,7 @@ def main():
 def run_win_cmd(cmd):
     """
     Runs a command in a new cmd window. This ONLY works on Windows OS.
+
     :param cmd: The command to run.
     :return:    None
     """
@@ -127,6 +128,7 @@ def run_win_cmd(cmd):
 def print_section(section_title, symbol):
     """
     Prints a section title encased in a box of stars.
+
     :param section_title:   The name of the section title.
     :param symbol:  The symbol to use to create a box around the section_title. Usually this will be the '*' symbol.
     :return:    None
