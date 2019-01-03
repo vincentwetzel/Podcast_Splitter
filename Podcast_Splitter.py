@@ -34,7 +34,7 @@ def main():
         # Initialize metadata values
         audio_file = MP3(file)
         id3_tags = ID3(file)  # Calls constructor
-        album_title = str(id3_tags.get("TALB"))  # Album Title
+        album_title = str(id3_tags.get("TALB")).strip()  # Album Title
 
         # TODO: Add in a way to check the genre and pass on the file if the genre is missing or not "Podcast"
 
