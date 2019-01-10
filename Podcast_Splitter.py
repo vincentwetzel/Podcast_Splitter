@@ -118,10 +118,11 @@ def run_win_cmd(cmd):
                                stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE)
     output, error = process.communicate()  # Prevents cout and cerr from locking up cmd.
-    for line in output:
-        result.append(line)  # In case we need to print this
+    if output:
+        for line in output:
+            result.append(line)  # In case we need to print this
     errcode = process.returncode  # 0 if completed
-    if errcode is not 0:  # NOTE: This was originally None but that is incorrect
+    if errcode != 0:  # NOTE: This was originally None but that is incorrect
         raise Exception('cmd %s failed, see above for details', cmd)
 
 
