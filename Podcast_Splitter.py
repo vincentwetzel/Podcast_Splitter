@@ -86,15 +86,15 @@ def main():
                 print(e)
 
     # Print a report of the files that were split
-    print_section("FINAL REPORT", "*")
-    print("\n")
+    print_section("PODCASTS SPLIT", "-")
     for key in files_split_dict:
         print_section(key, "*")
         for val in files_split_dict[key]:
             print(val)
 
     # Print a final report
-    print("\nFiles Split: " + str(files_split_count))
+    print_section("FINAL REPORT", "-")
+    print("Files Split: " + str(files_split_count))
     print("Files Moved: " + str(files_moved_count))
     print("Empty Directories Removed: " + str(empty_directories_removed))
     print("\nTotal Errors: " + str(len(files_with_unknown_album)))
@@ -113,14 +113,11 @@ def run_win_cmd(cmd):
     """
     print("INPUT COMMAND: " + str(cmd) + "\n")
     result = []
-    process = subprocess.Popen(cmd,
-                               shell=True,
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE)
-    output, error = process.communicate()  # Prevents cout and cerr from locking up cmd.
-    if output:
-        for line in output:
-            result.append(line)  # In case we need to print this
+    process = subprocess.Popen(cmd, shell=True)
+
+    # Prevent stdout and stderr from locking up cmd.
+    output, error = process.communicate()
+
     errcode = process.returncode  # 0 if completed
     if errcode != 0:  # NOTE: This was originally None but that is incorrect
         raise Exception('cmd %s failed, see above for details', cmd)
