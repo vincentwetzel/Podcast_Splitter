@@ -8,7 +8,6 @@ main_audio_dir = os.path.realpath("E:/Google Drive (vincentwetzel3@gmail.com)/Au
 mp3split_exe_loc = os.path.realpath(
     "C:/Program Files (x86)/mp3splt/mp3splt.exe")  # mp3splt (non-GUI) must be installed to run this.
 
-files_split_count = 0
 files_moved_count = 0
 files_split_dict = dict()
 files_with_unknown_album = list()
@@ -19,7 +18,6 @@ def main():
     # Initialize variables
     files_to_split_dir = os.path.join(main_audio_dir, "Podcasts - to split")
     output_dir = os.path.join(main_audio_dir, "Podcasts")
-    global files_split_count
     global files_moved_count
     global files_split_dict
     global files_with_unknown_album
@@ -49,12 +47,11 @@ def main():
 
             # Save info about this file for the final report
             if album_title not in files_split_dict:
-                files_split_dict[album_title] = [str(file)]
+                files_split_dict[album_title] = [file]
             else:
-                files_split_dict[album_title].append(str(file))
+                files_split_dict[album_title].append(file)
 
             os.remove(file)  # Delete original file once it has been splitted
-            files_split_count += 1
 
     # Move the splitted files to their new destination.
     for file in os.listdir(files_to_split_dir):
@@ -86,15 +83,20 @@ def main():
                 print(e)
 
     # Print a report of the files that were split
-    print_section("PODCASTS SPLIT", "-")
-    for key in files_split_dict:
-        print_section(key, "*")
-        for val in files_split_dict[key]:
-            print(val)
+    if files_split_dict:
+        print_section("PODCASTS SPLIT", "-")
+        for key in files_split_dict:
+            print_section(key, "*")
+            for val in files_split_dict[key]:
+                print(val)
+
+    # Print info about the Podcast directories
+    print_section("Podcast Directories Info", "-")
+    print_podcast_directories_filesize_info()
 
     # Print a final report
-    print_section("FINAL REPORT", "-")
-    print("Files Split: " + str(files_split_count))
+    print_section("FINAL REPORT", "*")
+    print("Files Split: " + str(len(files_split_dict.values())))
     print("Files Moved: " + str(files_moved_count))
     print("Empty Directories Removed: " + str(empty_directories_removed))
     print("\nTotal Errors: " + str(len(files_with_unknown_album)))
@@ -132,6 +134,45 @@ def print_section(section_title, symbol):
     :return:    None
     """
     print("\n" + (symbol * 50) + "\n* " + section_title + "\n" + (symbol * 50) + "\n")
+
+
+def print_podcast_directories_filesize_info():
+    main_podcast_dir = os.path.join(main_audio_dir, "Podcasts")
+
+    podcast_subdirectories = []
+    for val in os.listdir(main_podcast_dir):
+        val = os.path.join(main_podcast_dir, val)
+        if os.path.isdir(val):
+            podcast_subdirectories.append(val)
+
+    for d in podcast_subdirectories:
+        os.chdir(d)
+        dir_size = 0
+        dir_file_count = 0
+        for f in os.listdir(d):
+            if os.path.splitext(f)[1] != ".mp3":
+                print("SKIP: " + str(f))
+                continue
+            dir_size += os.path.getsize(f)
+            dir_file_count += 1
+        print("\nDIRECTORY: " + str(d))
+        print("FILE COUNT: " + str(dir_file_count))
+        print("Average file size: " + str(sizeof_fmt(dir_size / dir_file_count)))
+
+
+def sizeof_fmt(num, suffix='B'):
+    """
+    Converts a data sizes to more human-readable values.
+
+    :param num: The number to convert. This defaults to bytes.
+    :param suffix:  Default is bytes. If you want to convert another type then enter it as a parameter here (e.g. MB).
+    :return:    The converted value
+    """
+    for unit in ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi']:
+        if abs(num) < 1024.0:
+            return "%3.1f%s%s" % (num, unit, suffix)
+        num /= 1024.0
+    return "%.1f%s%s" % (num, 'Yi', suffix)
 
 
 if __name__ == "__main__":
