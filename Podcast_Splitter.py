@@ -156,8 +156,9 @@ def print_podcast_directories_filesize_info():
             dir_size += os.path.getsize(f)
             dir_file_count += 1
         print("\nDIRECTORY: " + str(d))
-        print("FILE COUNT: " + str(dir_file_count))
-        print("Average file size: " + str(sizeof_fmt(dir_size / dir_file_count)))
+        print("File Count: " + str(dir_file_count))
+        print("Average File Size: " + str(sizeof_fmt(dir_size / dir_file_count)))
+        print("Total File Size: " + str(sizeof_fmt(dir_size)))
 
 
 def sizeof_fmt(num, suffix='B'):
