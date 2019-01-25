@@ -2,7 +2,7 @@ import subprocess
 import os
 from mutagen.id3 import ID3
 from mutagen.mp3 import MP3
-import mutagen
+import shutil
 
 main_audio_dir = os.path.realpath("E:/Google Drive (vincentwetzel3@gmail.com)/Audio")
 mp3split_exe_loc = os.path.realpath(
@@ -26,7 +26,7 @@ def main():
     os.chdir(files_to_split_dir)  # Change current working directory
     # Split the files if they are < 10 min
     for file in os.listdir(os.getcwd()):
-        if str(file) == "Thumbs.db":
+        if str(file) == "Thumbs.db" or str.split(file, ".")[-1] == "part":
             continue
 
         # Initialize metadata values
@@ -67,8 +67,9 @@ def main():
             # If output directory doesn't exist, create it
             if not os.path.exists(os.path.join(output_dir, str(album_title))):
                 os.makedirs(os.path.join(output_dir, str(album_title)))
-            os.rename(os.path.join(files_to_split_dir, file),
-                      os.path.join(output_dir, str(album_title), file))  # Move file to final destination
+
+            # Move file to final destination
+            shutil.move(os.path.join(files_to_split_dir, file), os.path.join(output_dir, str(album_title), file))
 
             files_moved_count += 1
 
