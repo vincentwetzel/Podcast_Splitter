@@ -10,8 +10,8 @@ mp3split_exe_loc = os.path.realpath(
 
 files_moved_count = 0
 files_split_dict = dict()
-files_with_unknown_album = list()
-empty_directories_removed = 0
+files_with_unknown_album_list = list()
+empty_directories_removed_count = 0
 
 
 def main():
@@ -20,8 +20,8 @@ def main():
     output_dir = os.path.join(main_audio_dir, "Podcasts")
     global files_moved_count
     global files_split_dict
-    global files_with_unknown_album
-    global empty_directories_removed
+    global files_with_unknown_album_list
+    global empty_directories_removed_count
 
     os.chdir(files_to_split_dir)  # Change current working directory
     # Split the files if they are < 10 min
@@ -37,7 +37,7 @@ def main():
         # TODO: Add in a way to check the genre and pass on the file if the genre is missing or not "Podcast"
 
         if album_title == "None":
-            files_with_unknown_album.append(file)
+            files_with_unknown_album_list.append(file)
         elif audio_file.info.length < 601:  # Most 10 minute files are just over 600 seconds.
             continue
         else:
@@ -58,7 +58,7 @@ def main():
         extension = os.path.splitext(file)[-1].lower()
         if extension != ".mp3":
             continue
-        elif file in files_with_unknown_album:
+        elif file in files_with_unknown_album_list:
             pass
         else:
             id3_tags = ID3(file)  # Calls constructor
@@ -78,7 +78,7 @@ def main():
         if os.path.isdir(os.path.join(output_dir, dir)) and not os.listdir(os.path.join(output_dir, dir)):
             try:
                 os.rmdir(os.path.join(output_dir, dir))
-                empty_directories_removed += 1
+                empty_directories_removed_count += 1
                 print("Empty directory removed: " + str(os.path.join(output_dir, dir)))
             except OSError as e:
                 print(e)
@@ -97,13 +97,13 @@ def main():
 
     # Print a final report
     print_section("FINAL REPORT", "*")
-    print("Files Split: " + str(len(files_split_dict.values())))
+    print("Files Split: " + str(len(files_split_dict.keys())))
     print("Files Moved: " + str(files_moved_count))
-    print("Empty Directories Removed: " + str(empty_directories_removed))
-    print("\nTotal Errors: " + str(len(files_with_unknown_album)))
-    if len(files_with_unknown_album) > 0:
+    print("Empty Directories Removed: " + str(empty_directories_removed_count))
+    print("\nTotal Errors: " + str(len(files_with_unknown_album_list)))
+    if len(files_with_unknown_album_list) > 0:
         print_section("Files with Unknown Album (not split)", "*")
-        for file in files_with_unknown_album:
+        for file in files_with_unknown_album_list:
             print(file)
 
 
