@@ -12,6 +12,7 @@ files_moved_count = 0
 files_split_dict = dict()
 files_with_unknown_album_list = list()
 empty_directories_removed_count = 0
+total_podcasts_size = 0
 
 
 def main():
@@ -33,8 +34,6 @@ def main():
         audio_file = MP3(file)
         id3_tags = ID3(file)  # Calls constructor
         album_title = str(id3_tags.get("TALB")).strip()  # Album Title
-
-        # TODO: Add in a way to check the genre and pass on the file if the genre is missing or not "Podcast"
 
         if album_title == "None":
             files_with_unknown_album_list.append(file)
@@ -100,11 +99,14 @@ def main():
     print("Files Split: " + str(len(files_split_dict.keys())))
     print("Files Moved: " + str(files_moved_count))
     print("Empty Directories Removed: " + str(empty_directories_removed_count))
+    print("Total Size of All Podcasts: " + sizeof_fmt(total_podcasts_size))
     print("\nTotal Errors: " + str(len(files_with_unknown_album_list)))
     if len(files_with_unknown_album_list) > 0:
         print_section("Files with Unknown Album (not split)", "*")
         for file in files_with_unknown_album_list:
             print(file)
+
+    # Done!
 
 
 def run_win_cmd(cmd):
@@ -138,6 +140,8 @@ def print_section(section_title, symbol):
 
 
 def print_podcast_directories_filesize_info():
+    global total_podcasts_size
+
     main_podcast_dir = os.path.join(main_audio_dir, "Podcasts")
 
     podcast_subdirectories = []
@@ -160,6 +164,7 @@ def print_podcast_directories_filesize_info():
         print("File Count: " + str(dir_file_count))
         print("Average File Size: " + str(sizeof_fmt(dir_size / dir_file_count)))
         print("Total File Size: " + str(sizeof_fmt(dir_size)))
+        total_podcasts_size += dir_size
 
 
 def sizeof_fmt(num, suffix='B'):
