@@ -61,7 +61,7 @@ def main():
             pass
         else:
             id3_tags = ID3(file)  # Calls constructor
-            album_title = id3_tags.get("TALB")  # Album Title
+            album_title = str(id3_tags.get("TALB")).strip()  # Album Title
 
             # If output directory doesn't exist, create it
             if not os.path.exists(os.path.join(output_dir, str(album_title))):
