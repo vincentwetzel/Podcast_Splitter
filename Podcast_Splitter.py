@@ -10,6 +10,7 @@ mp3split_exe_loc = os.path.realpath(
 
 files_moved_count = 0
 files_split_dict = dict()
+files_split_count = 0
 files_with_unknown_album_list = list()
 empty_directories_removed_count = 0
 total_podcasts_size = 0
@@ -51,6 +52,8 @@ def main():
                 files_split_dict[album_title].append(file)
 
             os.remove(file)  # Delete original file once it has been splitted
+        global files_split_count
+        files_split_count += 1
 
     # Move the splitted files to their new destination.
     for file in os.listdir(files_to_split_dir):
@@ -96,7 +99,7 @@ def main():
 
     # Print a final report
     print_section("FINAL REPORT", "*")
-    print("Files Split: " + str(len(files_split_dict.keys())))
+    print("Files Split: " + str(files_split_count))
     print("Files Moved: " + str(files_moved_count))
     print("Empty Directories Removed: " + str(empty_directories_removed_count))
     print("Total Size of All Podcasts: " + sizeof_fmt(total_podcasts_size))
