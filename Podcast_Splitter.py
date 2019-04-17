@@ -25,9 +25,8 @@ def main():
     global files_with_unknown_album_list
     global empty_directories_removed_count
 
-    os.chdir(files_to_split_dir)  # Change current working directory
     # Split the files if they are < 10 min
-    for file in os.listdir(os.getcwd()):
+    for file in os.listdir(files_to_split_dir):
         if str(file) == "Thumbs.db" or str.split(file, ".")[-1] == "part":
             continue
 
@@ -75,6 +74,13 @@ def main():
 
             files_moved_count += 1
 
+    # If download directory is now empty, remove it.
+    if not os.listdir(files_to_split_dir):
+        try:
+            os.rmdir(files_to_split_dir)
+        except PermissionError as e:
+            print(e)
+
     # Check output directories, remove any that are empty.
     for dir in os.listdir(output_dir):
         if os.path.isdir(os.path.join(output_dir, dir)) and not os.listdir(os.path.join(output_dir, dir)):
@@ -83,6 +89,7 @@ def main():
                 empty_directories_removed_count += 1
                 print("Empty directory removed: " + str(os.path.join(output_dir, dir)))
             except OSError as e:
+                # OS error is thrown if files are in a directory when os.rmdir is called.
                 print(e)
 
     # Print a report of the files that were split
