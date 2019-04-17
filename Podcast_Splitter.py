@@ -25,72 +25,75 @@ def main():
     global files_with_unknown_album_list
     global empty_directories_removed_count
 
-    # Split the files if they are < 10 min
-    for file in os.listdir(files_to_split_dir):
-        if str(file) == "Thumbs.db" or str.split(file, ".")[-1] == "part":
-            continue
+    # Split the files if they are < 10
+    if os.path.isdir(files_to_split_dir):
+        for file in os.listdir(files_to_split_dir):
+            if str(file) == "Thumbs.db" or str.split(file, ".")[-1] == "part":
+                continue
 
-        # Initialize metadata values
-        audio_file = MP3(file)
-        id3_tags = ID3(file)  # Calls constructor
-        album_title = str(id3_tags.get("TALB")).strip()  # Album Title
-
-        if album_title == "None":
-            files_with_unknown_album_list.append(file)
-        elif audio_file.info.length < 601:  # Most 10 minute files are just over 600 seconds.
-            continue
-        else:
-            command = "\"" + mp3split_exe_loc + "\"" + ' -t 10.00 ' + '\"' + str(
-                file) + '\"'  # Must enclose file in "" in case of spaces
-            run_win_cmd(command)
-
-            # Save info about this file for the final report
-            if album_title not in files_split_dict:
-                files_split_dict[album_title] = [file]
-            else:
-                files_split_dict[album_title].append(file)
-
-            os.remove(file)  # Delete original file once it has been splitted
-        global files_split_count
-        files_split_count += 1
-
-    # Move the splitted files to their new destination.
-    for file in os.listdir(files_to_split_dir):
-        extension = os.path.splitext(file)[-1].lower()
-        if extension != ".mp3":
-            continue
-        elif file in files_with_unknown_album_list:
-            pass
-        else:
+            # Initialize metadata values
+            audio_file = MP3(file)
             id3_tags = ID3(file)  # Calls constructor
             album_title = str(id3_tags.get("TALB")).strip()  # Album Title
 
-            # If output directory doesn't exist, create it
-            if not os.path.exists(os.path.join(output_dir, str(album_title))):
-                os.makedirs(os.path.join(output_dir, str(album_title)))
+            if album_title == "None":
+                files_with_unknown_album_list.append(file)
+            elif audio_file.info.length < 601:  # Most 10 minute files are just over 600 seconds.
+                continue
+            else:
+                command = "\"" + mp3split_exe_loc + "\"" + ' -t 10.00 ' + '\"' + str(
+                    file) + '\"'  # Must enclose file in "" in case of spaces
+                run_win_cmd(command)
 
-            # Move file to final destination
-            shutil.move(os.path.join(files_to_split_dir, file), os.path.join(output_dir, str(album_title), file))
+                # Save info about this file for the final report
+                if album_title not in files_split_dict:
+                    files_split_dict[album_title] = [file]
+                else:
+                    files_split_dict[album_title].append(file)
 
-            files_moved_count += 1
+                os.remove(file)  # Delete original file once it has been splitted
+            global files_split_count
+            files_split_count += 1
+
+    # Move the splitted files to their new destination.
+    if os.path.isdir(files_to_split_dir):
+        for file in os.listdir(files_to_split_dir):
+            extension = os.path.splitext(file)[-1].lower()
+            if extension != ".mp3":
+                continue
+            elif file in files_with_unknown_album_list:
+                pass
+            else:
+                id3_tags = ID3(file)  # Calls constructor
+                album_title = str(id3_tags.get("TALB")).strip()  # Album Title
+
+                # If output directory doesn't exist, create it
+                if not os.path.exists(os.path.join(output_dir, str(album_title))):
+                    os.makedirs(os.path.join(output_dir, str(album_title)))
+
+                # Move file to final destination
+                shutil.move(os.path.join(files_to_split_dir, file), os.path.join(output_dir, str(album_title), file))
+
+                files_moved_count += 1
 
     # If download directory is now empty, remove it.
-    if not os.listdir(files_to_split_dir):
+    if os.path.isdir(files_to_split_dir) and not os.listdir(files_to_split_dir):
         try:
             os.rmdir(files_to_split_dir)
-        except PermissionError as e:
+        except Exception as e:
             print(e)
 
     # Check output directories, remove any that are empty.
-    for dir in os.listdir(output_dir):
-        if os.path.isdir(os.path.join(output_dir, dir)) and not os.listdir(os.path.join(output_dir, dir)):
-            try:
-                os.rmdir(os.path.join(output_dir, dir))
-                empty_directories_removed_count += 1
-                print("Empty directory removed: " + str(os.path.join(output_dir, dir)))
-            except OSError as e:
-                # OS error is thrown if files are in a directory when os.rmdir is called.
-                print(e)
+    if os.path.isdir(output_dir):
+        for dir in os.listdir(output_dir):
+            if os.path.isdir(os.path.join(output_dir, dir)) and not os.listdir(os.path.join(output_dir, dir)):
+                try:
+                    os.rmdir(os.path.join(output_dir, dir))
+                    empty_directories_removed_count += 1
+                    print("Empty directory removed: " + str(os.path.join(output_dir, dir)))
+                except OSError as e:
+                    # OS error is thrown if files are in a directory when os.rmdir is called.
+                    print(e)
 
     # Print a report of the files that were split
     if files_split_dict:
