@@ -27,6 +27,7 @@ def main():
 
     # Split the files if they are < 10
     if os.path.isdir(files_to_split_dir):
+        os.chdir(files_to_split_dir)
         for file in os.listdir(files_to_split_dir):
             if str(file) == "Thumbs.db" or str.split(file, ".")[-1] == "part":
                 continue
