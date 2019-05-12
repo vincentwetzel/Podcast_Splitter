@@ -10,6 +10,7 @@ mp3split_exe_loc = os.path.realpath(
 
 files_moved_count = 0
 files_split_dict = dict()
+"""{ Album Title : File }"""
 files_split_count = 0
 files_with_unknown_album_list = list()
 empty_directories_removed_count = 0
@@ -99,9 +100,9 @@ def main():
     # Print a report of the files that were split
     if files_split_dict:
         print_section("PODCASTS SPLIT", "-")
-        for key in files_split_dict:
-            print_section(key, "*")
-            for val in files_split_dict[key]:
+        for album_name in files_split_dict:
+            print_section(album_name, "*")
+            for val in files_split_dict[album_name]:
                 print(val)
 
     # Print info about the Podcast directories
@@ -158,27 +159,55 @@ def print_podcast_directories_filesize_info():
 
     main_podcast_dir = os.path.join(main_audio_dir, "Podcasts")
 
+    # Make a list of all the Podcast subdirectories
     podcast_subdirectories = []
     for val in os.listdir(main_podcast_dir):
         val = os.path.join(main_podcast_dir, val)
         if os.path.isdir(val):
             podcast_subdirectories.append(val)
 
-    for d in podcast_subdirectories:
-        os.chdir(d)
+    # Iterate over each Subdirectory, storing its info.
+    directory_infos = []
+    directory_avg_file_sizes = []
+    for podcast_directory in podcast_subdirectories:
+        dir_info = ""
+        os.chdir(podcast_directory)
         dir_size = 0
         dir_file_count = 0
-        for f in os.listdir(d):
+        for f in os.listdir(podcast_directory):
             if os.path.splitext(f)[1] != ".mp3":
                 print("SKIP: " + str(f))
                 continue
             dir_size += os.path.getsize(f)
             dir_file_count += 1
-        print("\nDIRECTORY: " + str(d))
-        print("File Count: " + str(dir_file_count))
-        print("Average File Size: " + str(sizeof_fmt(dir_size / dir_file_count)))
-        print("Total File Size: " + str(sizeof_fmt(dir_size)))
+
+        dir_info += "\nDIRECTORY: " + str(podcast_directory)
+        dir_info += "\nFile Count: " + str(dir_file_count)
+
+        avg_filesize = dir_size / dir_file_count
+        dir_info += "\nAverage File Size: " + str(sizeof_fmt(avg_filesize))
+
+        dir_info += "\nTotal File Size: " + str(sizeof_fmt(dir_size))
         total_podcasts_size += dir_size
+
+        if not directory_avg_file_sizes:
+            directory_avg_file_sizes.append(avg_filesize)
+            directory_infos.append(dir_info)
+        else:
+            is_inserted = False
+            for idx, val in enumerate(directory_avg_file_sizes):
+                if avg_filesize > val:
+                    directory_avg_file_sizes.insert(idx, avg_filesize)
+                    directory_infos.insert(idx, dir_info)
+                    is_inserted = True
+                    break
+            if not is_inserted:
+                directory_avg_file_sizes.append(avg_filesize)
+                directory_infos.append(dir_info)
+
+    # All info is assembled in order, now print it.
+    for dir_info in directory_infos:
+        print(dir_info)
 
 
 def sizeof_fmt(num, suffix='B'):
