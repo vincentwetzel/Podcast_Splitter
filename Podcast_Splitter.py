@@ -70,14 +70,16 @@ def main():
                 album_title = str(id3_tags.get("TALB")).strip()  # Album Title
 
                 # Strip out special characters from podcast title so we can make an acceptable folder name.
-                album_title_folder_name = ''.join(e for e in album_title if (e.isalnum() or e.isspace() or e == ','))
+                album_title_folder_name = ''.join(
+                    e for e in album_title if (e.isalnum() or e.isspace() or e == ',') or e == '.')
 
                 # If output directory doesn't exist, create it
                 if not os.path.exists(os.path.join(output_dir, str(album_title_folder_name))):
                     os.makedirs(os.path.join(output_dir, str(album_title_folder_name)))
 
                 # Move file to final destination
-                shutil.move(os.path.join(files_to_split_dir, file), os.path.join(output_dir, str(album_title_folder_name), file))
+                shutil.move(os.path.join(files_to_split_dir, file),
+                            os.path.join(output_dir, str(album_title_folder_name), file))
 
                 files_moved_count += 1
 
