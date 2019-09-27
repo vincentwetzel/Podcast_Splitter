@@ -30,7 +30,7 @@ def main():
     if os.path.isdir(files_to_split_dir):
         os.chdir(files_to_split_dir)
         for file in os.listdir(files_to_split_dir):
-            if str(file) == "Thumbs.db" or str.split(file, ".")[-1] == "part":
+            if str(file) == "Thumbs.db" or str(file) == "desktop.ini" or str.split(file, ".")[-1] == "part":
                 continue
 
             # Initialize metadata values
