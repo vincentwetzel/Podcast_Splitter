@@ -70,6 +70,7 @@ def main():
                 album_title = str(id3_tags.get("TALB")).strip()  # Album Title
 
                 # Strip out special characters from podcast title so we can make an acceptable folder name.
+                album_title_folder_name = album_title_folder_name.replace(':', '-')
                 album_title_folder_name = ''.join(
                     e for e in album_title if (e.isalnum() or e.isspace() or e == ',') or e == '.')
 
