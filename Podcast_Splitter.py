@@ -67,12 +67,11 @@ def main():
                 pass
             else:
                 id3_tags = ID3(file)  # Calls constructor
-                album_title = str(id3_tags.get("TALB")).strip()  # Album Title
+                album_title = str(id3_tags.get("TALB")).strip().replace(':', '-')  # Album Title
 
                 # Strip out special characters from podcast title so we can make an acceptable folder name.
-                album_title_folder_name = album_title_folder_name.replace(':', '-')
                 album_title_folder_name = ''.join(
-                    e for e in album_title if (e.isalnum() or e.isspace() or e == ',') or e == '.')
+                    e for e in album_title if (e.isalnum() or e.isspace() or e == ',' or e == '.'))
 
                 # If output directory doesn't exist, create it
                 if not os.path.exists(os.path.join(output_dir, str(album_title_folder_name))):
