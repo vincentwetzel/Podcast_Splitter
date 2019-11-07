@@ -71,7 +71,7 @@ def main():
 
                 # Strip out special characters from podcast title so we can make an acceptable folder name.
                 album_title_folder_name = ''.join(
-                    e for e in album_title if (e.isalnum() or e.isspace() or e == ',' or e == '.'))
+                    e for e in album_title if (e.isalnum() or e.isspace() or e == ',' or e == '.' or e == '-'))
 
                 # If output directory doesn't exist, create it
                 if not os.path.exists(os.path.join(output_dir, str(album_title_folder_name))):
