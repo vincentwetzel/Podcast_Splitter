@@ -39,6 +39,7 @@ def main():
             album_title = str(id3_tags.get("TALB")).strip()  # Album Title
 
             if album_title == "None":
+                # These cause errors, we will have to manually fix them before the script can split them.
                 files_with_unknown_album_list.append(file)
             elif audio_file.info.length < 601:  # Most 10 minute files are just over 600 seconds.
                 continue
@@ -53,11 +54,12 @@ def main():
                 else:
                     files_split_dict[album_title].append(file)
 
-                os.remove(file)  # Delete original file once it has been splitted
+                # Delete original file once it has been split
+                os.remove(file)
             global files_split_count
             files_split_count += 1
 
-    # Move the splitted files to their new destination.
+    # Move the split files to their new destination.
     if os.path.isdir(files_to_split_dir):
         for file in os.listdir(files_to_split_dir):
             extension = os.path.splitext(file)[-1].lower()
@@ -112,7 +114,7 @@ def main():
 
     # Print info about the Podcast directories
     print_section("Podcast Directories Info", "-")
-    print_podcast_directories_filesize_info()
+    print(get_podcast_directories_filesize_info())
 
     # Print a final report
     print_section("FINAL REPORT", "*")
@@ -159,9 +161,10 @@ def print_section(section_title, symbol):
     print("\n" + (symbol * 50) + "\n* " + section_title + "\n" + (symbol * 50) + "\n")
 
 
-def print_podcast_directories_filesize_info():
+def get_podcast_directories_filesize_info():
     global total_podcasts_size
 
+    output = ""
     main_podcast_dir = os.path.join(main_audio_dir, "Podcasts")
 
     # Make a list of all the Podcast subdirectories
@@ -179,11 +182,11 @@ def print_podcast_directories_filesize_info():
         os.chdir(podcast_directory)
         dir_size = 0
         dir_file_count = 0
-        for f in os.listdir(podcast_directory):
-            if os.path.splitext(f)[1] != ".mp3":
-                print("SKIP: " + str(f))
+        for podcast_file in os.listdir(podcast_directory):
+            if os.path.splitext(podcast_file)[1] != ".mp3":
+                output += "SKIP: " + str(podcast_file) + "\n"
                 continue
-            dir_size += os.path.getsize(f)
+            dir_size += os.path.getsize(podcast_file)
             dir_file_count += 1
 
         dir_info += "\nDIRECTORY: " + str(podcast_directory)
@@ -212,7 +215,9 @@ def print_podcast_directories_filesize_info():
 
     # All info is assembled in order, now print it.
     for dir_info in directory_infos:
-        print(dir_info)
+        output += dir_info + "\n"
+
+    return output
 
 
 def sizeof_fmt(num, suffix='B'):
