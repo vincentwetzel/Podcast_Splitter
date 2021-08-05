@@ -52,7 +52,7 @@ def main():
                 continue
             else:
                 # NOTE: We must enclose file in "" in case of spaces
-                command = "\"" + mp3split_exe_loc + "\" " + "-t 10.00 -g r%[@o,@n=-2,@t=#t_#mm_#ss__#Mm_#Ss]" + ' \"' + str(
+                command = "\"" + mp3split_exe_loc + "\" " + "-t 10.00 -g r%[@o,@g=Podcast,@n=-2,@t=#t_#mm_#ss__#Mm_#Ss]" + ' \"' + str(
                     file) + '\"'
                 logging.debug("SPLIT COMMAND: " + command)
                 run_win_cmd(command)
