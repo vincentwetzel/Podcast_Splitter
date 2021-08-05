@@ -1,20 +1,27 @@
+import logging
 import subprocess
 import os
+import sys
+from typing import Dict, List
+
 from mutagen.id3 import ID3
 from mutagen.mp3 import MP3
 import shutil
 
-main_audio_dir = os.path.realpath("E:/Google Drive (vincentwetzel3@gmail.com)/Audio")
-mp3split_exe_loc = os.path.realpath(
+# NOTE TO USER: use logging.DEBUG for testing, logging.CRITICAL for runtime
+logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
+
+main_audio_dir: str = os.path.realpath("E:/Google Drive (vincentwetzel3@gmail.com)/Audio")
+mp3split_exe_loc: str = os.path.realpath(
     "C:/Program Files (x86)/mp3splt/mp3splt.exe")  # mp3splt (non-GUI) must be installed to run this.
 
-files_moved_count = 0
-files_split_dict = dict()
+files_moved_count: int = 0
+files_split_dict: Dict[str, str] = dict()
 """{ Album Title : File }"""
-files_split_count = 0
-files_with_unknown_album_list = list()
-empty_directories_removed_count = 0
-total_podcasts_size = 0
+files_split_count: int = 0
+files_with_unknown_album_list: List[str] = list()
+empty_directories_removed_count: int = 0
+total_podcasts_size: int = 0
 
 
 def main():
@@ -44,8 +51,10 @@ def main():
             elif audio_file.info.length < 601:  # Most 10 minute files are just over 600 seconds.
                 continue
             else:
-                command = "\"" + mp3split_exe_loc + "\"" + ' -t 10.00 ' + '\"' + str(
-                    file) + '\"'  # Must enclose file in "" in case of spaces
+                # NOTE: We must enclose file in "" in case of spaces
+                command = "\"" + mp3split_exe_loc + "\" " + "-t 10.00 -g r%[@o,@n=-2,@t=#t_#mm_#ss__#Mm_#Ss]" + ' \"' + str(
+                    file) + '\"'
+                logging.debug("SPLIT COMMAND: " + command)
                 run_win_cmd(command)
 
                 # Save info about this file for the final report
