@@ -1,3 +1,4 @@
+import datetime
 import logging
 import subprocess
 import os
@@ -51,10 +52,12 @@ def main():
             elif audio_file.info.length < 601:  # Most 10 minute files are just over 600 seconds.
                 continue
             else:
+                album_artist = str(id3_tags.get("TPE2")).strip()
                 # NOTE: We must enclose file in "" in case of spaces
-                command = "\"" + mp3split_exe_loc + "\" " + "-t 10.00 -g r%[@o,@g=Podcast,@n=-2,@t=#t_#mm_#ss__#Mm_#Ss]" + ' \"' + str(
+                current_year = str(datetime.datetime.now().year)
+                command = "\"" + mp3split_exe_loc + "\" " + "-t 10.00 -g r%[@o,@g=Podcast,@n=-2,@a=\"" + album_artist + "\",@t=#t_#mm_#ss__#Mm_#Ss]" + ' \"' + str(
                     file) + '\"'
-                logging.debug("SPLIT COMMAND: " + command)
+                print("SPLIT COMMAND: " + command)
                 run_win_cmd(command)
 
                 # Save info about this file for the final report
