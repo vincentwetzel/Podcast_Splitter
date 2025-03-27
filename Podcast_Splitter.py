@@ -28,7 +28,7 @@ def main():
 
     files_to_split_dir = os.path.join(main_audio_dir, "Podcasts - to split")
     output_dir = os.path.join(main_audio_dir, "Podcasts")
-    files_split_dict: Dict[str, str] = dict()
+    files_split_dict: Dict[str, List[str]] = dict()
     """{ Album Title : File }"""
     files_with_unknown_album_list: List[str] = list()
 
