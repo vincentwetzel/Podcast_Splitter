@@ -12,27 +12,28 @@ import shutil
 # NOTE TO USER: use logging.DEBUG for testing, logging.CRITICAL for runtime
 logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
 
-main_audio_dir: str = os.path.realpath("E:/Google Drive (vincentwetzel3@gmail.com)/Audio")
-mp3split_exe_loc: str = os.path.realpath(
-    "C:/Program Files (x86)/mp3splt/mp3splt.exe")  # mp3splt (non-GUI) must be installed to run this.
-
-files_moved_count: int = 0
-files_split_dict: Dict[str, str] = dict()
-"""{ Album Title : File }"""
-files_split_count: int = 0
-files_with_unknown_album_list: List[str] = list()
-empty_directories_removed_count: int = 0
-total_podcasts_size: int = 0
+total_podcasts_size: float = 0
 
 
 def main():
+    global total_podcasts_size
+
     # Initialize variables
+    main_audio_dir: str = os.path.realpath("I:/Google Drive (vincentwetzel3@gmail.com)/Audio")
+    try:
+        mp3split_exe_loc: str = os.path.realpath(
+            "C:/mp3splt_2.6.2_i386/mp3splt.exe")  # mp3splt (non-GUI) must be installed to run this.
+    except OSError as e:
+        print("There was an issue")
+
     files_to_split_dir = os.path.join(main_audio_dir, "Podcasts - to split")
     output_dir = os.path.join(main_audio_dir, "Podcasts")
-    global files_moved_count
-    global files_split_dict
-    global files_with_unknown_album_list
-    global empty_directories_removed_count
+    files_split_dict: Dict[str, str] = dict()
+    """{ Album Title : File }"""
+    files_with_unknown_album_list: List[str] = list()
+
+    files_split_count: int = 0
+    files_moved_count: int = 0
 
     # Split the files if they are < 10
     if os.path.isdir(files_to_split_dir):
@@ -68,8 +69,9 @@ def main():
 
                 # Delete original file once it has been split
                 os.remove(file)
-            global files_split_count
             files_split_count += 1
+
+    empty_directories_removed_count: int = 0
 
     # Move the split files to their new destination.
     if os.path.isdir(files_to_split_dir):
@@ -126,7 +128,7 @@ def main():
 
     # Print info about the Podcast directories
     print_section("Podcast Directories Info", "-")
-    print(get_podcast_directories_filesize_info())
+    print(get_podcast_directories_filesize_info(main_audio_dir))
 
     # Print a final report
     print_section("FINAL REPORT", "*")
@@ -162,33 +164,39 @@ def run_win_cmd(cmd):
         raise Exception('cmd %s failed, see above for details', cmd)
 
 
-def print_section(section_title, symbol):
+def print_section(title, symbol):
     """
     Prints a section title encased in a box of stars.
 
-    :param section_title:   The name of the section title.
+    :param title:   The name of the section title.
     :param symbol:  The symbol to use to create a box around the section_title. Usually this will be the '*' symbol.
     :return:    None
     """
-    print("\n" + (symbol * 50) + "\n* " + section_title + "\n" + (symbol * 50) + "\n")
+    print("\n" + (symbol * 50) + "\n* " + title + "\n" + (symbol * 50) + "\n")
 
 
-def get_podcast_directories_filesize_info():
+def get_podcast_directories_filesize_info(dir):
+    """
+    :param dir: Where the audio files are (this should be the parent folder of the podcast folder)
+    :return: A string of information about the files in this directory
+    """
     global total_podcasts_size
 
-    output = ""
-    main_podcast_dir = os.path.join(main_audio_dir, "Podcasts")
+    output: str = ""
+    podcast_dir: str = os.path.join(dir, "Podcasts")
 
     # Make a list of all the Podcast subdirectories
-    podcast_subdirectories = []
-    for val in os.listdir(main_podcast_dir):
-        val = os.path.join(main_podcast_dir, val)
-        if os.path.isdir(val):
-            podcast_subdirectories.append(val)
+    podcast_subdirectories: list[str] = []
+    for directory in os.listdir(podcast_dir):
+        directory = os.path.join(podcast_dir, directory)
+
+        # If the directory exists and is not empty, add it to our list
+        if os.path.isdir(directory) and os.listdir(directory):
+            podcast_subdirectories.append(directory)
 
     # Iterate over each Subdirectory, storing its info.
-    directory_infos = []
-    directory_avg_file_sizes = []
+    directory_infos: list[str] = []
+    dir_avg_file_sizes: list[float] = []
     for podcast_directory in podcast_subdirectories:
         dir_info = ""
         os.chdir(podcast_directory)
@@ -210,19 +218,19 @@ def get_podcast_directories_filesize_info():
         dir_info += "\nTotal File Size: " + str(sizeof_fmt(dir_size))
         total_podcasts_size += dir_size
 
-        if not directory_avg_file_sizes:
-            directory_avg_file_sizes.append(avg_filesize)
+        if not dir_avg_file_sizes:
+            dir_avg_file_sizes.append(avg_filesize)
             directory_infos.append(dir_info)
         else:
             is_inserted = False
-            for idx, val in enumerate(directory_avg_file_sizes):
-                if avg_filesize > val:
-                    directory_avg_file_sizes.insert(idx, avg_filesize)
+            for idx, directory in enumerate(dir_avg_file_sizes):
+                if avg_filesize > directory:
+                    dir_avg_file_sizes.insert(idx, avg_filesize)
                     directory_infos.insert(idx, dir_info)
                     is_inserted = True
                     break
             if not is_inserted:
-                directory_avg_file_sizes.append(avg_filesize)
+                dir_avg_file_sizes.append(avg_filesize)
                 directory_infos.append(dir_info)
 
     # All info is assembled in order, now print it.
