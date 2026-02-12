@@ -1,162 +1,251 @@
-import datetime
+import argparse
 import logging
 import subprocess
-import os
 import sys
 import shutil
 import re
-from typing import Dict, List, Optional
+import os
+from typing import Dict, List, NamedTuple, Optional, Tuple
 from pathlib import Path
 
 from mutagen.id3 import ID3
 from mutagen.mp3 import MP3
 
-# Configuration
-LOG_LEVEL = logging.DEBUG
-# Use Path objects for better cross-platform handling
-DEFAULT_MAIN_DIR = Path("I:/Google Drive (vincentwetzel3@gmail.com)/Audio")
-MP3SPLT_EXE = Path("C:/mp3splt_2.6.2_i386/mp3splt.exe")
-
-logging.basicConfig(stream=sys.stderr, level=LOG_LEVEL, format='%(levelname)s: %(message)s')
+# Configure logging
+logging.basicConfig(stream=sys.stderr, level=logging.INFO, format='%(levelname)s: %(message)s')
 
 
-def sanitize_folder_name(name: str) -> str:
-    """Removes characters that are illegal in Windows filenames."""
-    # Replace common illegal characters with a hyphen
-    return re.sub(r'[<>:"/\\|?*]', '-', name).strip()
+class ProcessResult(NamedTuple):
+    """Holds the results of the processing operation."""
+    originals_split: Dict[str, List[str]]
+    files_moved: int
+    empty_dirs_removed: int
+    total_library_size: float
+    failed_files: List[Path]
 
 
-def sizeof_fmt(num: float, suffix: str = 'B') -> str:
-    """Converts data sizes to human-readable values."""
-    for unit in ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi']:
-        if abs(num) < 1024.0:
-            return f"{num:3.1f}{unit}{suffix}"
-        num /= 1024.0
-    return f"{num:.1f}Yi{suffix}"
+class PodcastProcessor:
+    """
+    Processes podcast files: splits long files and organizes them.
+    This class is stateless and operates on the directories provided to its methods.
+    """
+    # Configuration constants
+    SPLIT_DURATION_MINUTES = 10.0
+    MIN_LENGTH_SECONDS = SPLIT_DURATION_MINUTES * 60 + 1
+    MP3SPLT_OUTPUT_RE = re.compile(r"info: creating file '([^']*)'")
 
+    def __init__(self, mp3splt_path: Path):
+        if not mp3splt_path.exists():
+            raise FileNotFoundError(f"mp3splt executable not found at {mp3splt_path}")
+        self.mp3splt_path = mp3splt_path
 
-def run_split_cmd(exe: Path, file_path: Path, album_artist: str) -> bool:
-    """Executes the mp3splt command safely using subprocess.run."""
-    # Construct command as a list to avoid shell injection and quoting issues
-    command = [
-        str(exe),
-        "-t", "10.00",
-        "-g", f"r%[@o,@g=Podcast,@n=-2,@a=\"{album_artist}\",@t=#t_#mm_#ss__#Mm_#Ss]",
-        str(file_path)
-    ]
+    def process_directory(self, source_dir: Path, output_dir: Path) -> ProcessResult:
+        """Orchestrates the splitting and organization of podcast files."""
+        if not source_dir.exists():
+            logging.warning(f"Source directory not found: {source_dir}")
+            return ProcessResult({}, 0, 0, 0.0, [])
 
-    logging.debug(f"Running command: {' '.join(command)}")
-    try:
-        # check=True will raise an exception if the command fails (non-zero exit code)
-        subprocess.run(command, check=True, capture_output=True, text=True)
-        return True
-    except subprocess.CalledProcessError as e:
-        logging.error(f"Split failed for {file_path.name}: {e.stderr}")
-        return False
+        files_to_organize: List[Path] = []
+        originals_split: Dict[str, List[str]] = {}
+        failed_files: List[Path] = []
 
+        logging.info(f"--- Phase 1: Scanning and Processing Files in {source_dir} ---")
+        for file_path in sorted(source_dir.glob("*.mp3")):
+            new_files, original_album, failure = self._process_single_file(file_path)
+            
+            if failure:
+                failed_files.append(failure)
+            if new_files:
+                files_to_organize.extend(new_files)
+            if original_album:
+                originals_split.setdefault(original_album, []).append(file_path.name)
 
-def main():
-    if not MP3SPLT_EXE.exists():
-        logging.critical(f"mp3splt executable not found at {MP3SPLT_EXE}")
-        return
+        # Phase 2: Organize all collected files
+        moved_count, org_failures = self._organize_files(files_to_organize, output_dir)
+        failed_files.extend(org_failures)
 
-    to_split_dir = DEFAULT_MAIN_DIR / "Podcasts - to split"
-    output_base_dir = DEFAULT_MAIN_DIR / "Podcasts"
+        # Phase 3: Cleanup and calculate final size
+        empty_dirs_removed = self._cleanup_empty_dirs(output_dir)
+        total_size = sum(p.stat().st_size for p in output_dir.rglob("*.mp3"))
 
-    if not to_split_dir.exists():
-        logging.info(f"Directory not found: {to_split_dir}")
-        return
+        return ProcessResult(
+            originals_split=originals_split,
+            files_moved=moved_count,
+            empty_dirs_removed=empty_dirs_removed,
+            total_library_size=total_size,
+            failed_files=failed_files,
+        )
 
-    files_split_dict: Dict[str, List[str]] = {}
-    unknown_album_files: List[str] = []
-
-    split_count = 0
-    moved_count = 0
-    total_size = 0.0
-
-    # --- Phase 1: Splitting ---
-    for file_path in to_split_dir.glob("*.mp3"):
+    def _process_single_file(self, file_path: Path) -> Tuple[List[Path], Optional[str], Optional[Path]]:
+        """
+        Processes one file, either splitting it or marking it for organization.
+        Returns (files_to_organize, original_album_if_split, failed_path).
+        """
         try:
-            audio = MP3(file_path)
             tags = ID3(file_path)
+            album_title_frame = tags.get("TALB")
+            if not album_title_frame:
+                logging.warning(f"Skipping '{file_path.name}': No album tag found.")
+                return [], None, file_path
 
-            album_title = tags.get("TALB")
-            album_artist = str(tags.get("TPE2", "Unknown Artist")).strip()
+            album_title = str(album_title_frame)
+            audio = MP3(file_path)
 
-            if not album_title:
-                unknown_album_files.append(file_path.name)
-                continue
-
-            # Skip if already short (under 10 mins / 600s)
-            if audio.info.length < 601:
-                continue
-
-            success = run_split_cmd(MP3SPLT_EXE, file_path, album_artist)
-
-            if success:
-                album_str = str(album_title)
-                files_split_dict.setdefault(album_str, []).append(file_path.name)
-                # Only remove original if split was successful
-                file_path.unlink()
-                split_count += 1
+            if audio.info.length < self.MIN_LENGTH_SECONDS:
+                logging.info(f"'{file_path.name}' is short. Marking for organization.")
+                return [file_path], None, None
+            else:
+                logging.info(f"'{file_path.name}' is long. Attempting to split.")
+                album_artist = str(tags.get("TPE2", "Unknown Artist")).strip()
+                
+                new_chunks = self._run_split_cmd(file_path, album_artist)
+                if new_chunks:
+                    logging.info(f"Successfully split '{file_path.name}' into {len(new_chunks)} chunks.")
+                    file_path.unlink()  # Delete original file
+                    return new_chunks, album_title, None
+                else:
+                    logging.error(f"Failed to split '{file_path.name}'. It will be left in place.")
+                    return [], None, file_path
 
         except Exception as e:
-            logging.error(f"Error processing {file_path.name}: {e}")
+            logging.error(f"An unexpected error occurred while processing {file_path.name}: {e}")
+            return [], None, file_path
 
-    # --- Phase 2: Moving & Organizing ---
-    # Re-scan the directory for the new chunks created by mp3splt
-    for chunk_path in to_split_dir.glob("*.mp3"):
-        if chunk_path.name in unknown_album_files:
-            continue
-
+    def _run_split_cmd(self, file_path: Path, album_artist: str) -> List[Path]:
+        """Executes the mp3splt command and returns a list of created chunk paths."""
+        command = [
+            str(self.mp3splt_path), "-t", f"{self.SPLIT_DURATION_MINUTES}.00",
+            "-g", f"r%[@o,@g=Podcast,@n=-2,@a=\"{album_artist}\",@t=#t_#mm_#ss__#Mm_#Ss]",
+            str(file_path)
+        ]
+        logging.debug(f"Running command: {' '.join(command)}")
         try:
-            tags = ID3(chunk_path)
-            album_title = str(tags.get("TALB", "Unknown Album"))
+            result = subprocess.run(
+                command, check=True, capture_output=True, text=True, cwd=file_path.parent
+            )
+            chunk_names = self.MP3SPLT_OUTPUT_RE.findall(result.stdout)
+            if not chunk_names:
+                logging.warning(f"mp3splt ran for {file_path.name} but no output files were detected.")
+                return []
+            return [file_path.parent / name for name in chunk_names]
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Split command failed for {file_path.name}:\n{e.stderr}")
+            return []
 
-            folder_name = sanitize_folder_name(album_title)
-            dest_dir = output_base_dir / folder_name
-            dest_dir.mkdir(parents=True, exist_ok=True)
+    def _organize_files(self, files_to_move: List[Path], output_dir: Path) -> Tuple[int, List[Path]]:
+        """Moves files to their final destination. Returns (moved_count, failed_paths)."""
+        logging.info(f"--- Phase 2: Organizing {len(files_to_move)} Files ---")
+        moved_count = 0
+        failed_paths = []
+        for file_path in files_to_move:
+            if not file_path.exists():
+                logging.warning(f"Cannot move '{file_path.name}' as it no longer exists.")
+                continue
+            try:
+                tags = ID3(file_path)
+                album_title = str(tags.get("TALB", "Unknown Album"))
+                folder_name = self._sanitize_folder_name(album_title)
+                dest_dir = output_dir / folder_name
+                dest_dir.mkdir(parents=True, exist_ok=True)
 
-            shutil.move(str(chunk_path), str(dest_dir / chunk_path.name))
-            moved_count += 1
-        except Exception as e:
-            logging.error(f"Error moving {chunk_path.name}: {e}")
+                shutil.move(str(file_path), str(dest_dir / file_path.name))
+                moved_count += 1
+            except Exception as e:
+                logging.error(f"Error moving {file_path.name}: {e}")
+                failed_paths.append(file_path)
+        return moved_count, failed_paths
 
-    # --- Phase 3: Cleanup & Reporting ---
-    # Remove empty subdirectories in output
-    empty_dirs_removed = 0
-    if output_base_dir.exists():
-        for sub_dir in output_base_dir.iterdir():
-            if sub_dir.is_dir() and not any(sub_dir.iterdir()):
-                sub_dir.rmdir()
-                empty_dirs_removed += 1
+    @staticmethod
+    def _cleanup_empty_dirs(output_dir: Path) -> int:
+        """Removes empty subdirectories from the output folder."""
+        logging.info("--- Phase 3: Cleaning Up Empty Directories ---")
+        removed_count = 0
+        if not output_dir.exists():
+            return 0
+        for dirpath, _, _ in sorted(os.walk(output_dir), key=lambda x: x[0].count(os.sep), reverse=True):
+            if dirpath == str(output_dir):
+                continue
+            try:
+                p = Path(dirpath)
+                if not any(p.iterdir()):
+                    p.rmdir()
+                    logging.info(f"Removed empty directory: {p}")
+                    removed_count += 1
+            except OSError as e:
+                logging.error(f"Error removing directory {dirpath}: {e}")
+        return removed_count
 
-    # Calculate total size of the final library
-    for p_file in output_base_dir.rglob("*.mp3"):
-        total_size += p_file.stat().st_size
-
-    print_report(split_count, moved_count, empty_dirs_removed, total_size, unknown_album_files, files_split_dict)
+    @staticmethod
+    def _sanitize_folder_name(name: str) -> str:
+        return re.sub(r'[<>:"/\\|?*]', '-', name).strip()
 
 
-def print_report(split, moved, removed, size, unknowns, split_details):
+def print_summary_report(result: ProcessResult):
+    """Prints a final report of the operations."""
+    def sizeof_fmt(num: float, suffix: str = 'B') -> str:
+        for unit in ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi']:
+            if abs(num) < 1024.0:
+                return f"{num:3.1f}{unit}{suffix}"
+            num /= 1024.0
+        return f"{num:.1f}Yi{suffix}"
+
     print("\n" + "=" * 50)
     print("FINAL REPORT")
     print("=" * 50)
-    print(f"Files Split:                {split}")
-    print(f"Files Moved:                {moved}")
-    print(f"Empty Directories Removed:  {removed}")
-    print(f"Total Library Size:         {sizeof_fmt(size)}")
-    print(f"Errors (Unknown Album):     {len(unknowns)}")
+    print(f"Original Files Split:       {len(result.originals_split)}")
+    print(f"Total Chunks/Files Moved:   {result.files_moved}")
+    print(f"Empty Directories Removed:  {result.empty_dirs_removed}")
+    print(f"Total Library Size:         {sizeof_fmt(result.total_library_size)}")
+    print(f"Errors/Files Not Processed: {len(result.failed_files)}")
 
-    if unknowns:
-        print("\nFILES WITH UNKNOWN ALBUMS:")
-        for f in unknowns: print(f" - {f}")
+    if result.failed_files:
+        print("\nFILES NOT PROCESSED (see logs for details):")
+        for f in result.failed_files:
+            print(f" - {f.name}")
 
-    if split_details:
-        print("\nPODCASTS PROCESSED:")
-        for album, files in split_details.items():
+    if result.originals_split:
+        print("\nORIGINAL FILES PROCESSED:")
+        for album, files in result.originals_split.items():
             print(f"\n[{album}]")
-            for f in files: print(f"  > {f}")
+            for f in files:
+                print(f"  > {f}")
+    print("\n" + "=" * 50)
+
+
+def main():
+    """Main function to parse arguments and run the PodcastProcessor."""
+    parser = argparse.ArgumentParser(description="Split and organize long MP3 podcast files.")
+    parser.add_argument(
+        "--input-dir", type=Path, required=True,
+        help="The directory containing podcast files to split."
+    )
+    parser.add_argument(
+        "--output-dir", type=Path, required=True,
+        help="The base directory for storing organized podcasts."
+    )
+    parser.add_argument(
+        "--mp3splt-path", type=Path, required=True,
+        help="The full path to the mp3splt executable."
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Enable verbose DEBUG logging."
+    )
+    args = parser.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    try:
+        processor = PodcastProcessor(mp3splt_path=args.mp3splt_path)
+        result = processor.process_directory(source_dir=args.input_dir, output_dir=args.output_dir)
+        print_summary_report(result)
+    except FileNotFoundError as e:
+        logging.critical(e)
+        sys.exit(1)
+    except Exception as e:
+        logging.critical(f"An unexpected error occurred: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
