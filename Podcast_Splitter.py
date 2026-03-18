@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 import subprocess
 import sys
@@ -10,6 +11,7 @@ from pathlib import Path
 
 from mutagen.id3 import ID3
 from mutagen.mp3 import MP3
+from send2trash import send2trash
 
 # Configure logging
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -32,7 +34,7 @@ class PodcastProcessor:
     # Configuration constants
     SPLIT_DURATION_MINUTES = 10.0
     MIN_LENGTH_SECONDS = SPLIT_DURATION_MINUTES * 60 + 1
-    MP3SPLT_OUTPUT_RE = re.compile(r"info: creating file '([^']*)'")
+    MP3SPLT_OUTPUT_RE = re.compile(r'^\s*File\s+"(?:.*[\\/])?([^"]+\.mp3)"\s+created', re.MULTILINE | re.IGNORECASE)
 
     def __init__(self, mp3splt_path: Path):
         if not mp3splt_path.exists():
@@ -47,6 +49,7 @@ class PodcastProcessor:
 
         files_to_organize: List[Path] = []
         originals_split: Dict[str, List[str]] = {}
+        originals_to_recycle: Dict[str, Path] = {} # Map album to original file path
         failed_files: List[Path] = []
 
         logging.info(f"--- Phase 1: Scanning and Processing Files in {source_dir} ---")
@@ -58,11 +61,17 @@ class PodcastProcessor:
             if new_files:
                 files_to_organize.extend(new_files)
             if original_album:
-                originals_split.setdefault(original_album, []).append(file_path.name)
+                # Track original file for potential recycling later
+                originals_to_recycle[original_album] = file_path
+                # We need the chunk names, not the original file name, to check for move failures
+                chunk_names = [chunk.name for chunk in new_files]
+                originals_split.setdefault(original_album, []).extend(chunk_names)
 
         # Phase 2: Organize all collected files
         moved_count, org_failures = self._organize_files(files_to_organize, output_dir)
         failed_files.extend(org_failures)
+        
+        self._recycle_successful_originals(originals_to_recycle, originals_split, failed_files)
 
         # Phase 3: Cleanup and calculate final size
         empty_dirs_removed = self._cleanup_empty_dirs(output_dir)
@@ -101,7 +110,6 @@ class PodcastProcessor:
                 new_chunks = self._run_split_cmd(file_path, album_artist)
                 if new_chunks:
                     logging.info(f"Successfully split '{file_path.name}' into {len(new_chunks)} chunks.")
-                    file_path.unlink()  # Delete original file
                     return new_chunks, album_title, None
                 else:
                     logging.error(f"Failed to split '{file_path.name}'. It will be left in place.")
@@ -115,17 +123,18 @@ class PodcastProcessor:
         """Executes the mp3splt command and returns a list of created chunk paths."""
         command = [
             str(self.mp3splt_path), "-t", f"{self.SPLIT_DURATION_MINUTES}.00",
-            "-g", f"r%[@o,@g=Podcast,@n=-2,@a=\"{album_artist}\",@t=#t_#mm_#ss__#Mm_#Ss]",
+            "-g", f"r%[@o,@g=Podcast,@n=-2,@a={album_artist},@t=#t_#mm_#ss__#Mm_#Ss]",
             str(file_path)
         ]
         logging.debug(f"Running command: {' '.join(command)}")
         try:
             result = subprocess.run(
-                command, check=True, capture_output=True, text=True, cwd=file_path.parent
+                command, check=True, stdout=subprocess.PIPE, text=True, cwd=file_path.parent, stderr=subprocess.STDOUT
             )
             chunk_names = self.MP3SPLT_OUTPUT_RE.findall(result.stdout)
             if not chunk_names:
-                logging.warning(f"mp3splt ran for {file_path.name} but no output files were detected.")
+                logging.warning(f"mp3splt ran for {file_path.name} but no output files were detected. Full mp3splt output below:")
+                logging.warning(f"---\n{result.stdout}\n---")
                 return []
             return [file_path.parent / name for name in chunk_names]
         except subprocess.CalledProcessError as e:
@@ -154,6 +163,26 @@ class PodcastProcessor:
                 logging.error(f"Error moving {file_path.name}: {e}")
                 failed_paths.append(file_path)
         return moved_count, failed_paths
+
+    def _recycle_successful_originals(self, originals_to_recycle: Dict[str, Path], originals_split: Dict[str, List[str]], failed_files: List[Path]):
+        """Sends original files to the recycle bin if their chunks were processed without error."""
+        failed_file_names = {f.name for f in failed_files}
+        
+        for album, original_path in originals_to_recycle.items():
+            # Check if any of the chunks from this original failed to move
+            split_files = originals_split.get(album, [])
+            was_successful = True
+            for chunk_name in split_files:
+                if chunk_name in failed_file_names:
+                    was_successful = False
+                    break
+            
+            if was_successful and original_path.exists():
+                try:
+                    send2trash(str(original_path))
+                    logging.info(f"Successfully recycled original file: {original_path.name}")
+                except Exception as e:
+                    logging.error(f"Failed to recycle original file {original_path.name}: {e}")
 
     @staticmethod
     def _cleanup_empty_dirs(output_dir: Path) -> int:
@@ -212,19 +241,51 @@ def print_summary_report(result: ProcessResult):
     print("\n" + "=" * 50)
 
 
+def load_settings(config_path: Path) -> Dict[str, str]:
+    """Load default settings from a JSON file.
+
+    The settings file should be a JSON object with keys:
+      - input_dir
+      - output_dir
+      - mp3splt_path
+
+    Any missing or invalid values will be ignored.
+    """
+
+    if not config_path.exists():
+        logging.debug(f"Settings file not found: {config_path}")
+        return {}
+
+    try:
+        with config_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("Settings file must contain a JSON object")
+        return {k: str(v) for k, v in data.items() if v is not None}
+    except Exception as e:
+        logging.error(f"Failed to load settings from {config_path}: {e}")
+        return {}
+
+
 def main():
     """Main function to parse arguments and run the PodcastProcessor."""
+    default_config_path = Path(__file__).resolve().parent / "settings.json"
+
     parser = argparse.ArgumentParser(description="Split and organize long MP3 podcast files.")
     parser.add_argument(
-        "--input-dir", type=Path, required=True,
+        "--config", type=Path, default=default_config_path,
+        help=f"Path to a JSON settings file (default: {default_config_path})"
+    )
+    parser.add_argument(
+        "--input-dir", type=Path, required=False,
         help="The directory containing podcast files to split."
     )
     parser.add_argument(
-        "--output-dir", type=Path, required=True,
+        "--output-dir", type=Path, required=False,
         help="The base directory for storing organized podcasts."
     )
     parser.add_argument(
-        "--mp3splt-path", type=Path, required=True,
+        "--mp3splt-path", type=Path, required=False,
         help="The full path to the mp3splt executable."
     )
     parser.add_argument(
@@ -236,9 +297,23 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    settings = load_settings(args.config) if args.config else {}
+
+    input_dir = args.input_dir or settings.get("input_dir")
+    output_dir = args.output_dir or settings.get("output_dir")
+    mp3splt_path = args.mp3splt_path or settings.get("mp3splt_path")
+
+    # Ensure required values are set (either via CLI or settings file)
+    if not input_dir:
+        parser.error("Missing required argument: --input-dir (or set input_dir in settings.json)")
+    if not output_dir:
+        parser.error("Missing required argument: --output-dir (or set output_dir in settings.json)")
+    if not mp3splt_path:
+        parser.error("Missing required argument: --mp3splt-path (or set mp3splt_path in settings.json)")
+
     try:
-        processor = PodcastProcessor(mp3splt_path=args.mp3splt_path)
-        result = processor.process_directory(source_dir=args.input_dir, output_dir=args.output_dir)
+        processor = PodcastProcessor(mp3splt_path=Path(mp3splt_path))
+        result = processor.process_directory(source_dir=Path(input_dir), output_dir=Path(output_dir))
         print_summary_report(result)
     except FileNotFoundError as e:
         logging.critical(e)
