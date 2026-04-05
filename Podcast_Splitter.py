@@ -10,6 +10,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 from pathlib import Path
 
 from mutagen._file import File as MutagenFile
+from mutagen.id3 import TCON
 from send2trash import send2trash
 
 # Configure logging
@@ -186,6 +187,8 @@ class PodcastProcessor:
 
             if file_length < self.MIN_LENGTH_SECONDS:
                 logging.info(f"'{file_path.name}' is short ({file_length:.0f}s). Marking for organization.")
+                # Set genre before organizing
+                self._set_genre_podcast(file_path)
                 return [file_path], None, None
             else:
                 logging.info(f"'{file_path.name}' is long ({file_length:.0f}s). Attempting to split.")
@@ -273,7 +276,7 @@ class PodcastProcessor:
                 # Calculate start and end times
                 start_seconds = i * self.SPLIT_DURATION_SECONDS
                 end_seconds = min((i + 1) * self.SPLIT_DURATION_SECONDS, file_length)
-                
+
                 start_min = int(start_seconds // 60)
                 start_sec = int(start_seconds % 60)
                 end_min = int(end_seconds // 60)
@@ -287,7 +290,11 @@ class PodcastProcessor:
                 # Move and rename
                 chunk.rename(new_path)
                 final_chunks.append(new_path)
-            
+
+            # Set genre to "Podcast" for all chunks
+            for chunk_path in final_chunks:
+                self._set_genre_podcast(chunk_path)
+
             return final_chunks
             
         except subprocess.CalledProcessError as e:
@@ -313,12 +320,14 @@ class PodcastProcessor:
                 album_title, _, _ = self._get_metadata(file_path)
                 if album_title is None:
                     album_title = "Unknown Album"
-                
+
                 folder_name = self._sanitize_folder_name(album_title)
                 dest_dir = output_dir / folder_name
                 dest_dir.mkdir(parents=True, exist_ok=True)
 
-                shutil.move(file_path, dest_dir / file_path.name)
+                dest_path = dest_dir / file_path.name
+                shutil.move(file_path, dest_path)
+                
                 moved_count += 1
             except Exception as e:
                 logging.error(f"Error moving {file_path.name}: {e}")
@@ -368,6 +377,43 @@ class PodcastProcessor:
     @staticmethod
     def _sanitize_folder_name(name: str) -> str:
         return re.sub(r'[<>:"/\\|?*]', '-', name).strip()
+
+    def _set_genre_podcast(self, file_path: Path):
+        """Set the genre tag to 'Podcast' for an audio file."""
+        try:
+            audio = MutagenFile(file_path, easy=False)
+            if audio is None:
+                logging.warning(f"Cannot set genre for {file_path.name}: Unable to read file")
+                return
+
+            # Get the file extension to determine format
+            ext = file_path.suffix.lower()
+
+            if ext == '.mp3':
+                # ID3 tags for MP3
+                if audio.tags:
+                    audio.tags["TCON"] = TCON(encoding=3, text="Podcast")
+            elif ext in {'.opus', '.ogg', '.flac'}:
+                # Vorbis comments for Opus, OGG, FLAC
+                if audio.tags:
+                    audio.tags["GENRE"] = "Podcast"
+                else:
+                    logging.debug(f"No tags found in {file_path.name}")
+            elif ext in {'.m4a', '.aac'}:
+                # MP4 tags for M4A, AAC
+                if audio.tags:
+                    audio.tags["\xa9gen"] = "Podcast"
+                else:
+                    logging.debug(f"No tags found in {file_path.name}")
+            else:
+                # Generic attempt for other formats
+                if audio.tags:
+                    audio.tags["GENRE"] = "Podcast"
+
+            audio.save()
+            logging.debug(f"Set genre to 'Podcast' for {file_path.name}")
+        except Exception as e:
+            logging.warning(f"Failed to set genre for {file_path.name}: {e}")
 
     @staticmethod
     def _cleanup_leftovers(source_dir: Path):
