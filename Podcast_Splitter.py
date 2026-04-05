@@ -291,9 +291,11 @@ class PodcastProcessor:
                 chunk.rename(new_path)
                 final_chunks.append(new_path)
 
-            # Set genre to "Podcast" for all chunks
+            # Set genre and title for all chunks
             for chunk_path in final_chunks:
                 self._set_genre_podcast(chunk_path)
+                # Set title tag to match the filename (without extension)
+                self._set_title_tag(chunk_path, chunk_path.stem)
 
             return final_chunks
             
@@ -414,6 +416,39 @@ class PodcastProcessor:
             logging.debug(f"Set genre to 'Podcast' for {file_path.name}")
         except Exception as e:
             logging.warning(f"Failed to set genre for {file_path.name}: {e}")
+
+    def _set_title_tag(self, file_path: Path, title: str):
+        """Set the title tag for an audio file."""
+        try:
+            audio = MutagenFile(file_path, easy=False)
+            if audio is None:
+                logging.warning(f"Cannot set title for {file_path.name}: Unable to read file")
+                return
+
+            ext = file_path.suffix.lower()
+
+            if ext == '.mp3':
+                from mutagen.id3 import TIT2
+                if audio.tags:
+                    audio.tags["TIT2"] = TIT2(encoding=3, text=title)
+            elif ext in {'.opus', '.ogg', '.flac'}:
+                if audio.tags:
+                    audio.tags["TITLE"] = title
+                else:
+                    logging.debug(f"No tags found in {file_path.name}")
+            elif ext in {'.m4a', '.aac'}:
+                if audio.tags:
+                    audio.tags["\xa9nam"] = title
+                else:
+                    logging.debug(f"No tags found in {file_path.name}")
+            else:
+                if audio.tags:
+                    audio.tags["TITLE"] = title
+
+            audio.save()
+            logging.debug(f"Set title to '{title}' for {file_path.name}")
+        except Exception as e:
+            logging.warning(f"Failed to set title for {file_path.name}: {e}")
 
     @staticmethod
     def _cleanup_leftovers(source_dir: Path):
