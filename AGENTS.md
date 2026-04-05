@@ -13,7 +13,7 @@ The PodcastSplitter agent is responsible for splitting podcast audio files into 
 - **Smart metadata extraction**: Handles ID3 tags (MP3), Vorbis comments (Opus/OGG), and MP4 tags (M4A/AAC)
 - **Automatic organization**: Moves processed files into album-named folders
 - **Recycle bin**: Sends original files to recycle bin after successful processing
-- **Timestamp naming**: Output files include start/end timestamps (e.g., `podcast_0m_00s__10m_00s.opus`)
+- **Timestamp naming**: Output files include start/end timestamps (e.g., `podcast_00m_00s__10m_00s.opus`)
 
 ### Configuration
 
