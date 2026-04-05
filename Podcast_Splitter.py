@@ -9,8 +9,7 @@ import os
 from typing import Dict, List, NamedTuple, Optional, Tuple
 from pathlib import Path
 
-from mutagen.id3 import ID3
-from mutagen.mp3 import MP3
+from mutagen._file import File as MutagenFile
 from send2trash import send2trash
 
 # Configure logging
@@ -33,13 +32,25 @@ class PodcastProcessor:
     """
     # Configuration constants
     SPLIT_DURATION_MINUTES = 10.0
-    MIN_LENGTH_SECONDS = SPLIT_DURATION_MINUTES * 60 + 1
-    MP3SPLT_OUTPUT_RE = re.compile(r'^\s*File\s+"(?:.*[\\/])?([^"]+\.mp3)"\s+created', re.MULTILINE | re.IGNORECASE)
+    SPLIT_DURATION_SECONDS = SPLIT_DURATION_MINUTES * 60
+    MIN_LENGTH_SECONDS = SPLIT_DURATION_SECONDS + 1
+    # Support multiple audio formats
+    SUPPORTED_EXTENSIONS = {'.mp3', '.opus', '.m4a', '.aac', '.ogg', '.flac', '.wav'}
 
-    def __init__(self, mp3splt_path: Path):
-        if not mp3splt_path.exists():
-            raise FileNotFoundError(f"mp3splt executable not found at {mp3splt_path}")
-        self.mp3splt_path = mp3splt_path
+    def __init__(self, ffmpeg_path: Optional[Path] = None):
+        if ffmpeg_path is None:
+            # Try to find ffmpeg in system PATH
+            ffmpeg_path_str = shutil.which("ffmpeg")
+            if ffmpeg_path_str is None:
+                raise FileNotFoundError(
+                    "ffmpeg executable not found. Please install ffmpeg and add it to your system PATH, "
+                    "or provide the path via --ffmpeg-path."
+                )
+            self.ffmpeg_path = Path(ffmpeg_path_str)
+        else:
+            if not ffmpeg_path.exists():
+                raise FileNotFoundError(f"ffmpeg executable not found at {ffmpeg_path}")
+            self.ffmpeg_path = ffmpeg_path
 
     def process_directory(self, source_dir: Path, output_dir: Path) -> ProcessResult:
         """Orchestrates the splitting and organization of podcast files."""
@@ -47,25 +58,30 @@ class PodcastProcessor:
             logging.warning(f"Source directory not found: {source_dir}")
             return ProcessResult({}, 0, 0, 0.0, [])
 
+        # Clean up any leftover temp directories and orphaned chunks from previous runs
+        self._cleanup_leftovers(source_dir)
+
         files_to_organize: List[Path] = []
         originals_split: Dict[str, List[str]] = {}
         originals_to_recycle: Dict[str, Path] = {} # Map album to original file path
         failed_files: List[Path] = []
 
         logging.info(f"--- Phase 1: Scanning and Processing Files in {source_dir} ---")
-        for file_path in sorted(source_dir.glob("*.mp3")):
-            new_files, original_album, failure = self._process_single_file(file_path)
-            
-            if failure:
-                failed_files.append(failure)
-            if new_files:
-                files_to_organize.extend(new_files)
-            if original_album:
-                # Track original file for potential recycling later
-                originals_to_recycle[original_album] = file_path
-                # We need the chunk names, not the original file name, to check for move failures
-                chunk_names = [chunk.name for chunk in new_files]
-                originals_split.setdefault(original_album, []).extend(chunk_names)
+        # Scan for all supported audio formats
+        for ext in self.SUPPORTED_EXTENSIONS:
+            for file_path in sorted(source_dir.glob(f"*{ext}")):
+                new_files, original_album, failure = self._process_single_file(file_path)
+
+                if failure:
+                    failed_files.append(failure)
+                if new_files:
+                    files_to_organize.extend(new_files)
+                if original_album:
+                    # Track original file for potential recycling later
+                    originals_to_recycle[original_album] = file_path
+                    # We need the chunk names, not the original file name, to check for move failures
+                    chunk_names = [chunk.name for chunk in new_files]
+                    originals_split.setdefault(original_album, []).extend(chunk_names)
 
         # Phase 2: Organize all collected files
         moved_count, org_failures = self._organize_files(files_to_organize, output_dir)
@@ -75,7 +91,10 @@ class PodcastProcessor:
 
         # Phase 3: Cleanup and calculate final size
         empty_dirs_removed = self._cleanup_empty_dirs(output_dir)
-        total_size = sum(p.stat().st_size for p in output_dir.rglob("*.mp3"))
+        # Calculate size of all supported audio files
+        total_size = 0.0
+        for ext in self.SUPPORTED_EXTENSIONS:
+            total_size += sum(p.stat().st_size for p in output_dir.rglob(f"*{ext}"))
 
         return ProcessResult(
             originals_split=originals_split,
@@ -85,29 +104,102 @@ class PodcastProcessor:
             failed_files=failed_files,
         )
 
+    def _get_metadata(self, file_path: Path) -> Tuple[Optional[str], Optional[str], Optional[float]]:
+        """
+        Extract metadata from audio file.
+        Returns (album_title, album_artist, duration) or (None, None, None) on failure.
+        """
+        try:
+            audio = MutagenFile(file_path, easy=False)
+            if audio is None:
+                return None, None, None
+            
+            # Get duration
+            duration = None
+            if hasattr(audio, 'info') and hasattr(audio.info, 'length'):
+                duration = audio.info.length
+            
+            if duration is None:
+                return None, None, None
+            
+            # Try to extract album title and artist from various metadata formats
+            album_title = None
+            album_artist = None
+            
+            if hasattr(audio, 'tags') and audio.tags:
+                tags = audio.tags
+                
+                # Try ID3 tags (MP3)
+                album_title = str(tags.get("TALB")) if tags.get("TALB") else None
+                album_artist = str(tags.get("TPE2")) if tags.get("TPE2") else None
+                
+                # Try Vorbis comments (Opus, OGG) - use case-insensitive search
+                if album_title is None:
+                    for key in tags.keys():
+                        if key.upper() == "ALBUM":
+                            album_title = str(tags[key][0])
+                            break
+                if album_artist is None:
+                    for key in tags.keys():
+                        if key.upper() == "ALBUMARTIST":
+                            album_artist = str(tags[key][0])
+                            break
+                
+                # Fallback to title if no album found (common for podcasts)
+                if album_title is None:
+                    for key in tags.keys():
+                        if key.upper() in ["TITLE", "TIT2"]:
+                            album_title = str(tags[key][0])
+                            break
+                
+                # Fallback to artist if no album artist found
+                if album_artist is None:
+                    for key in tags.keys():
+                        if key.upper() in ["ARTIST", "TPE1"]:
+                            album_artist = str(tags[key][0])
+                            break
+                
+                # Try MP4-style tags (M4A, AAC)
+                if album_title is None and "\xa9alb" in tags:
+                    album_title = str(tags["\xa9alb"][0])
+                if album_artist is None and "aART" in tags:
+                    album_artist = str(tags["aART"][0])
+            
+            return album_title, album_artist, duration
+            
+        except Exception as e:
+            logging.debug(f"Failed to extract metadata from {file_path.name}: {e}")
+            return None, None, None
+
     def _process_single_file(self, file_path: Path) -> Tuple[List[Path], Optional[str], Optional[Path]]:
         """
         Processes one file, either splitting it or marking it for organization.
         Returns (files_to_organize, original_album_if_split, failed_path).
         """
         try:
-            tags = ID3(file_path)
-            album_title_frame = tags.get("TALB")
-            if not album_title_frame:
-                logging.warning(f"Skipping '{file_path.name}': No album tag found.")
+            album_title, album_artist, file_length = self._get_metadata(file_path)
+            
+            if album_title is None:
+                logging.warning(f"Skipping '{file_path.name}': No album/title metadata found.")
+                return [], None, file_path
+            
+            if file_length is None:
+                logging.warning(f"Skipping '{file_path.name}': Unable to determine file length.")
                 return [], None, file_path
 
-            album_title = str(album_title_frame)
-            audio = MP3(file_path)
-
-            if audio.info.length < self.MIN_LENGTH_SECONDS:
-                logging.info(f"'{file_path.name}' is short. Marking for organization.")
+            if file_length < self.MIN_LENGTH_SECONDS:
+                logging.info(f"'{file_path.name}' is short ({file_length:.0f}s). Marking for organization.")
                 return [file_path], None, None
             else:
-                logging.info(f"'{file_path.name}' is long. Attempting to split.")
-                album_artist = str(tags.get("TPE2", "Unknown Artist")).strip()
+                logging.info(f"'{file_path.name}' is long ({file_length:.0f}s). Attempting to split.")
                 
-                new_chunks = self._run_split_cmd(file_path, album_artist)
+                # Use default if no album artist found
+                if album_artist is None:
+                    album_artist = "Unknown Artist"
+                else:
+                    album_artist = album_artist.strip()
+
+                new_chunks = self._run_ffmpeg_split(file_path, album_artist)
                 if new_chunks:
                     logging.info(f"Successfully split '{file_path.name}' into {len(new_chunks)} chunks.")
                     return new_chunks, album_title, None
@@ -116,29 +208,100 @@ class PodcastProcessor:
                     return [], None, file_path
 
         except Exception as e:
+            import traceback
             logging.error(f"An unexpected error occurred while processing {file_path.name}: {e}")
+            logging.error(f"Traceback: {traceback.format_exc()}")
             return [], None, file_path
 
-    def _run_split_cmd(self, file_path: Path, album_artist: str) -> List[Path]:
-        """Executes the mp3splt command and returns a list of created chunk paths."""
+    def _run_ffmpeg_split(self, file_path: Path, album_artist: str) -> List[Path]:
+        """
+        Uses ffmpeg to split audio file into chunks of SPLIT_DURATION_MINUTES.
+        Returns a list of created chunk paths.
+        """
+        # Get file extension and length
+        output_ext = file_path.suffix
+        
+        # Get file length for proper timestamp calculation
+        _, _, file_length = self._get_metadata(file_path)
+        if file_length is None:
+            logging.error(f"Unable to get file length for {file_path.name}")
+            return []
+        
+        # Build ffmpeg command to split into chunks - output directly to source directory
+        chunk_pattern = f"%03d{output_ext}"
+        output_pattern = str(file_path.parent / f"{file_path.stem}_chunk_{chunk_pattern}")
+        
         command = [
-            str(self.mp3splt_path), "-t", f"{self.SPLIT_DURATION_MINUTES}.00",
-            "-g", f"r%[@o,@g=Podcast,@n=-2,@a={album_artist},@t=#t_#mm_#ss__#Mm_#Ss]",
-            str(file_path)
+            str(self.ffmpeg_path),
+            "-i", str(file_path),
+            "-f", "segment",
+            "-segment_time", str(self.SPLIT_DURATION_SECONDS),
+            "-c", "copy",  # Copy codec, don't re-encode
+            "-map", "0:a",  # Only map audio streams
+            "-reset_timestamps", "1",
+            output_pattern
         ]
-        logging.debug(f"Running command: {' '.join(command)}")
+        
+        logging.debug(f"Running ffmpeg command: {' '.join(command)}")
+        
         try:
             result = subprocess.run(
-                command, check=True, stdout=subprocess.PIPE, text=True, cwd=file_path.parent, stderr=subprocess.STDOUT
+                command, 
+                check=True, 
+                stdout=subprocess.DEVNULL,  # Don't capture stdout for performance
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=file_path.parent
             )
-            chunk_names = self.MP3SPLT_OUTPUT_RE.findall(result.stdout)
-            if not chunk_names:
-                logging.warning(f"mp3splt ran for {file_path.name} but no output files were detected. Full mp3splt output below:")
-                logging.warning(f"---\n{result.stdout}\n---")
+            
+            # Get all created chunk files
+            # Find files that match the pattern: {stem}_chunk_{digits}{ext}
+            chunk_prefix = f"{file_path.stem}_chunk_"
+            chunks = []
+            for f in file_path.parent.iterdir():
+                if f.is_file() and f.name.startswith(chunk_prefix) and f.name.endswith(output_ext):
+                    # Verify the middle part is numeric (chunk number)
+                    middle = f.name[len(chunk_prefix):-len(output_ext)]
+                    if middle.isdigit():
+                        chunks.append(f)
+            chunks = sorted(chunks)
+            
+            if not chunks:
+                logging.warning(f"ffmpeg ran for {file_path.name} but no output files were detected.")
+                if result.stderr:
+                    logging.warning(f"ffmpeg stderr:\n{result.stderr}")
                 return []
-            return [file_path.parent / name for name in chunk_names]
+            
+            # Rename chunks to the expected format with timestamps
+            final_chunks = []
+            for i, chunk in enumerate(chunks):
+                # Calculate start and end times
+                start_seconds = i * self.SPLIT_DURATION_SECONDS
+                end_seconds = min((i + 1) * self.SPLIT_DURATION_SECONDS, file_length)
+                
+                start_min = int(start_seconds // 60)
+                start_sec = int(start_seconds % 60)
+                end_min = int(end_seconds // 60)
+                end_sec = int(end_seconds % 60)
+                
+                # Format: {stem}_{start_time}__{end_time}{ext}
+                # Example: Flood the Zone_40m_00s__50m_00s.mp3
+                new_name = f"{file_path.stem}_{start_min}m_{start_sec:02d}s__{end_min}m_{end_sec:02d}s{output_ext}"
+                new_path = file_path.parent / new_name
+
+                # Move and rename
+                chunk.rename(new_path)
+                final_chunks.append(new_path)
+            
+            return final_chunks
+            
         except subprocess.CalledProcessError as e:
-            logging.error(f"Split command failed for {file_path.name}:\n{e.stderr}")
+            logging.error(f"Split command failed for {file_path.name}:")
+            if e.stderr:
+                logging.error(f"stderr: {e.stderr}")
+            return []
+        except Exception as e:
+            logging.error(f"Unexpected error during ffmpeg execution: {e}")
             return []
 
     def _organize_files(self, files_to_move: List[Path], output_dir: Path) -> Tuple[int, List[Path]]:
@@ -151,8 +314,11 @@ class PodcastProcessor:
                 logging.warning(f"Cannot move '{file_path.name}' as it no longer exists.")
                 continue
             try:
-                tags = ID3(file_path)
-                album_title = str(tags.get("TALB", "Unknown Album"))
+                # Try to get album title using improved metadata extraction
+                album_title, _, _ = self._get_metadata(file_path)
+                if album_title is None:
+                    album_title = "Unknown Album"
+                
                 folder_name = self._sanitize_folder_name(album_title)
                 dest_dir = output_dir / folder_name
                 dest_dir.mkdir(parents=True, exist_ok=True)
@@ -208,6 +374,35 @@ class PodcastProcessor:
     def _sanitize_folder_name(name: str) -> str:
         return re.sub(r'[<>:"/\\|?*]', '-', name).strip()
 
+    @staticmethod
+    def _cleanup_leftovers(source_dir: Path):
+        """Cleans up temp directories and orphaned chunk files from previous failed runs."""
+        cleaned_dirs = 0
+        cleaned_files = 0
+        
+        # Remove _temp_* directories
+        for item in source_dir.iterdir():
+            if item.is_dir() and item.name.startswith('_temp_'):
+                try:
+                    shutil.rmtree(item)
+                    logging.info(f"Removed leftover temp directory: {item.name}")
+                    cleaned_dirs += 1
+                except Exception as e:
+                    logging.warning(f"Failed to remove temp directory {item.name}: {e}")
+        
+        # Remove orphaned chunk files
+        for item in source_dir.iterdir():
+            if item.is_file() and '_chunk_' in item.name and item.suffix in {'.mp3', '.opus', '.m4a', '.aac', '.ogg', '.flac', '.wav'}:
+                try:
+                    item.unlink()
+                    logging.info(f"Removed orphaned chunk file: {item.name}")
+                    cleaned_files += 1
+                except Exception as e:
+                    logging.warning(f"Failed to remove chunk file {item.name}: {e}")
+        
+        if cleaned_dirs > 0 or cleaned_files > 0:
+            logging.info(f"Cleaned up {cleaned_dirs} temp directories and {cleaned_files} orphaned chunk files")
+
 
 def print_summary_report(result: ProcessResult):
     """Prints a final report of the operations."""
@@ -247,7 +442,7 @@ def load_settings(config_path: Path) -> Dict[str, str]:
     The settings file should be a JSON object with keys:
       - input_dir
       - output_dir
-      - mp3splt_path
+      - ffmpeg_path (optional, will use system PATH if not provided)
 
     Any missing or invalid values will be ignored.
     """
@@ -271,7 +466,7 @@ def main():
     """Main function to parse arguments and run the PodcastProcessor."""
     default_config_path = Path(__file__).resolve().parent / "settings.json"
 
-    parser = argparse.ArgumentParser(description="Split and organize long MP3 podcast files.")
+    parser = argparse.ArgumentParser(description="Split and organize long audio podcast files.")
     parser.add_argument(
         "--config", type=Path, default=default_config_path,
         help=f"Path to a JSON settings file (default: {default_config_path})"
@@ -285,8 +480,8 @@ def main():
         help="The base directory for storing organized podcasts."
     )
     parser.add_argument(
-        "--mp3splt-path", type=Path, required=False,
-        help="The full path to the mp3splt executable."
+        "--ffmpeg-path", type=Path, required=False,
+        help="The full path to the ffmpeg executable (optional, uses system PATH if not provided)."
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true",
@@ -301,18 +496,16 @@ def main():
 
     input_dir = args.input_dir or settings.get("input_dir")
     output_dir = args.output_dir or settings.get("output_dir")
-    mp3splt_path = args.mp3splt_path or settings.get("mp3splt_path")
+    ffmpeg_path = args.ffmpeg_path or settings.get("ffmpeg_path")
 
     # Ensure required values are set (either via CLI or settings file)
     if not input_dir:
         parser.error("Missing required argument: --input-dir (or set input_dir in settings.json)")
     if not output_dir:
         parser.error("Missing required argument: --output-dir (or set output_dir in settings.json)")
-    if not mp3splt_path:
-        parser.error("Missing required argument: --mp3splt-path (or set mp3splt_path in settings.json)")
 
     try:
-        processor = PodcastProcessor(mp3splt_path=Path(mp3splt_path))
+        processor = PodcastProcessor(ffmpeg_path=Path(ffmpeg_path) if ffmpeg_path else None)
         result = processor.process_directory(source_dir=Path(input_dir), output_dir=Path(output_dir))
         print_summary_report(result)
     except FileNotFoundError as e:
