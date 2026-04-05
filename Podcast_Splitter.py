@@ -64,7 +64,7 @@ class PodcastProcessor:
 
         files_to_organize: List[Path] = []
         originals_split: Dict[str, List[str]] = {}
-        originals_to_recycle: Dict[str, Path] = {} # Map album to original file path
+        originals_to_recycle: Dict[str, Path] = {} # Map original filename to its Path
         failed_files: List[Path] = []
 
         logging.info(f"--- Phase 1: Scanning and Processing Files in {source_dir} ---")
@@ -78,11 +78,12 @@ class PodcastProcessor:
                 if new_files:
                     files_to_organize.extend(new_files)
                 if original_album:
-                    # Track original file for potential recycling later
-                    originals_to_recycle[original_album] = file_path
-                    # We need the chunk names, not the original file name, to check for move failures
+                    # Track original file by its unique filename (not album title)
+                    original_key = file_path.name
+                    originals_to_recycle[original_key] = file_path
+                    # Group chunks by original file key
                     chunk_names = [chunk.name for chunk in new_files]
-                    originals_split.setdefault(original_album, []).extend(chunk_names)
+                    originals_split.setdefault(original_key, []).extend(chunk_names)
 
         # Phase 2: Organize all collected files
         moved_count, org_failures = self._organize_files(files_to_organize, output_dir)
@@ -327,10 +328,10 @@ class PodcastProcessor:
     def _recycle_successful_originals(self, originals_to_recycle: Dict[str, Path], originals_split: Dict[str, List[str]], failed_files: List[Path]):
         """Sends original files to the recycle bin if their chunks were processed without error."""
         failed_file_names = {f.name for f in failed_files}
-        
-        for album, original_path in originals_to_recycle.items():
+
+        for original_key, original_path in originals_to_recycle.items():
             # Check if any of the chunks from this original failed to move
-            split_files = originals_split.get(album, [])
+            split_files = originals_split.get(original_key, [])
             was_successful = True
             for chunk_name in split_files:
                 if chunk_name in failed_file_names:
