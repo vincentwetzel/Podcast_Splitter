@@ -277,10 +277,10 @@ class PodcastProcessor:
                 start_sec = int(start_seconds % 60)
                 end_min = int(end_seconds // 60)
                 end_sec = int(end_seconds % 60)
-                
+
                 # Format: {stem}_{start_time}__{end_time}{ext}
                 # Example: Flood the Zone_40m_00s__50m_00s.mp3
-                new_name = f"{file_path.stem}_{start_min}m_{start_sec:02d}s__{end_min}m_{end_sec:02d}s{output_ext}"
+                new_name = f"{file_path.stem}_{start_min:02d}m_{start_sec:02d}s__{end_min:02d}m_{end_sec:02d}s{output_ext}"
                 new_path = file_path.parent / new_name
 
                 # Move and rename
