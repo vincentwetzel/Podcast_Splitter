@@ -15,6 +15,9 @@ from send2trash import send2trash
 # Configure logging
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format='%(levelname)s: %(message)s')
 
+# Supported audio format extensions
+SUPPORTED_EXTENSIONS = {'.mp3', '.opus', '.m4a', '.aac', '.ogg', '.flac', '.wav'}
+
 
 class ProcessResult(NamedTuple):
     """Holds the results of the processing operation."""
@@ -34,8 +37,6 @@ class PodcastProcessor:
     SPLIT_DURATION_MINUTES = 10.0
     SPLIT_DURATION_SECONDS = SPLIT_DURATION_MINUTES * 60
     MIN_LENGTH_SECONDS = SPLIT_DURATION_SECONDS + 1
-    # Support multiple audio formats
-    SUPPORTED_EXTENSIONS = {'.mp3', '.opus', '.m4a', '.aac', '.ogg', '.flac', '.wav'}
 
     def __init__(self, ffmpeg_path: Optional[Path] = None):
         if ffmpeg_path is None:
@@ -68,7 +69,7 @@ class PodcastProcessor:
 
         logging.info(f"--- Phase 1: Scanning and Processing Files in {source_dir} ---")
         # Scan for all supported audio formats
-        for ext in self.SUPPORTED_EXTENSIONS:
+        for ext in SUPPORTED_EXTENSIONS:
             for file_path in sorted(source_dir.glob(f"*{ext}")):
                 new_files, original_album, failure = self._process_single_file(file_path)
 
@@ -93,7 +94,7 @@ class PodcastProcessor:
         empty_dirs_removed = self._cleanup_empty_dirs(output_dir)
         # Calculate size of all supported audio files
         total_size = 0.0
-        for ext in self.SUPPORTED_EXTENSIONS:
+        for ext in SUPPORTED_EXTENSIONS:
             total_size += sum(p.stat().st_size for p in output_dir.rglob(f"*{ext}"))
 
         return ProcessResult(
@@ -128,37 +129,32 @@ class PodcastProcessor:
             
             if hasattr(audio, 'tags') and audio.tags:
                 tags = audio.tags
-                
+
                 # Try ID3 tags (MP3)
                 album_title = str(tags.get("TALB")) if tags.get("TALB") else None
                 album_artist = str(tags.get("TPE2")) if tags.get("TPE2") else None
-                
-                # Try Vorbis comments (Opus, OGG) - use case-insensitive search
+
+                # Helper to find a tag case-insensitively
+                def find_tag(*names):
+                    for key in tags.keys():
+                        if key.upper() in names:
+                            return str(tags[key][0])
+                    return None
+
+                # Try Vorbis comments (Opus, OGG)
                 if album_title is None:
-                    for key in tags.keys():
-                        if key.upper() == "ALBUM":
-                            album_title = str(tags[key][0])
-                            break
+                    album_title = find_tag("ALBUM")
                 if album_artist is None:
-                    for key in tags.keys():
-                        if key.upper() == "ALBUMARTIST":
-                            album_artist = str(tags[key][0])
-                            break
-                
+                    album_artist = find_tag("ALBUMARTIST")
+
                 # Fallback to title if no album found (common for podcasts)
                 if album_title is None:
-                    for key in tags.keys():
-                        if key.upper() in ["TITLE", "TIT2"]:
-                            album_title = str(tags[key][0])
-                            break
-                
+                    album_title = find_tag("TITLE", "TIT2")
+
                 # Fallback to artist if no album artist found
                 if album_artist is None:
-                    for key in tags.keys():
-                        if key.upper() in ["ARTIST", "TPE1"]:
-                            album_artist = str(tags[key][0])
-                            break
-                
+                    album_artist = find_tag("ARTIST", "TPE1")
+
                 # Try MP4-style tags (M4A, AAC)
                 if album_title is None and "\xa9alb" in tags:
                     album_title = str(tags["\xa9alb"][0])
@@ -208,9 +204,7 @@ class PodcastProcessor:
                     return [], None, file_path
 
         except Exception as e:
-            import traceback
-            logging.error(f"An unexpected error occurred while processing {file_path.name}: {e}")
-            logging.error(f"Traceback: {traceback.format_exc()}")
+            logging.exception(f"An unexpected error occurred while processing {file_path.name}: {e}")
             return [], None, file_path
 
     def _run_ffmpeg_split(self, file_path: Path, album_artist: str) -> List[Path]:
@@ -323,7 +317,7 @@ class PodcastProcessor:
                 dest_dir = output_dir / folder_name
                 dest_dir.mkdir(parents=True, exist_ok=True)
 
-                shutil.move(str(file_path), str(dest_dir / file_path.name))
+                shutil.move(file_path, dest_dir / file_path.name)
                 moved_count += 1
             except Exception as e:
                 logging.error(f"Error moving {file_path.name}: {e}")
@@ -392,7 +386,7 @@ class PodcastProcessor:
         
         # Remove orphaned chunk files
         for item in source_dir.iterdir():
-            if item.is_file() and '_chunk_' in item.name and item.suffix in {'.mp3', '.opus', '.m4a', '.aac', '.ogg', '.flac', '.wav'}:
+            if item.is_file() and '_chunk_' in item.name and item.suffix in SUPPORTED_EXTENSIONS:
                 try:
                     item.unlink()
                     logging.info(f"Removed orphaned chunk file: {item.name}")

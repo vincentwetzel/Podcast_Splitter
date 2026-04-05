@@ -28,10 +28,16 @@ Uses `settings.json` with keys:
 # Run with settings.json defaults
 python Podcast_Splitter.py
 
-# Override settings
+# Override settings via CLI
 python Podcast_Splitter.py --input-dir "/path/to/podcasts" --output-dir "/path/to/output"
 
-# Verbose mode
+# Specify ffmpeg path explicitly
+python Podcast_Splitter.py --ffmpeg-path "/path/to/ffmpeg"
+
+# Custom config file
+python Podcast_Splitter.py --config /path/to/settings.json
+
+# Verbose/debug logging
 python Podcast_Splitter.py -v
 ```
 
