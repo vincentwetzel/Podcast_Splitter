@@ -41,11 +41,30 @@ class PodcastProcessor:
 
     def __init__(self, ffmpeg_path: Optional[Path] = None):
         if ffmpeg_path is None:
-            # Try to find ffmpeg in system PATH
+            # Try to find ffmpeg in PATH using shutil.which
             ffmpeg_path_str = shutil.which("ffmpeg")
+
+            if ffmpeg_path_str is None:
+                # Fallback: use 'where' command which queries the system PATH directly
+                try:
+                    result = subprocess.run(
+                        ["where", "ffmpeg"],
+                        capture_output=True,
+                        text=True,
+                        check=True
+                    )
+                    if result.stdout:
+                        ffmpeg_path_str = result.stdout.strip().split('\n')[0].strip()
+                        if not Path(ffmpeg_path_str).exists():
+                            ffmpeg_path_str = None
+                except subprocess.CalledProcessError:
+                    pass
+                except Exception:
+                    pass
+
             if ffmpeg_path_str is None:
                 raise FileNotFoundError(
-                    "ffmpeg executable not found. Please install ffmpeg and add it to your system PATH, "
+                    "ffmpeg executable not found in system PATH. Please install ffmpeg and ensure it is in your PATH, "
                     "or provide the path via --ffmpeg-path."
                 )
             self.ffmpeg_path = Path(ffmpeg_path_str)
